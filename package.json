@@ -1,6 +1,6 @@
 {
   "name": "shipfe",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A deployment tool for web applications",
   "main": "index.js",
   "bin": {
