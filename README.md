@@ -145,6 +145,13 @@ shipfe deploy --profile dev-shop
 shipfe deploy --profile dev-cu
 ```
 
+### Deploy all sub-environments at once
+```bash
+shipfe deploy --profile dev --all-sub
+```
+
+This will deploy to all sub-environments (admin, shop, cu) in sequence.
+
 Sub-environments inherit settings from the parent environment and can override `build_command`, `local_dist_path`, and `remote_deploy_path`.
 
 **Or use environment variable for all servers:**
