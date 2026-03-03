@@ -121,7 +121,8 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, deploy_path: &s
 
     // 上传文件
     log_message("正在上传文件到服务器");
-    let mut remote_file = sess.scp_send(std::path::Path::new(local_archive), 0o644, local_archive.len() as u64, None).map_err(|e| {
+    let remote_archive = format!("{}/dist.tar.gz", remote_tmp);
+    let mut remote_file = sess.scp_send(std::path::Path::new(&remote_archive), 0o644, local_archive.len() as u64, None).map_err(|e| {
         log_message(&format!("文件上传初始化失败: {}", e));
         LicenseError::Invalid(e.to_string())
     })?;
@@ -137,11 +138,9 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, deploy_path: &s
 
     // 执行部署命令
     let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
-    let remote_archive = format!("{}/dist.tar.gz", remote_tmp);
 
     let commands = vec![
         format!("mkdir -p {}", deploy_path),
-        format!("mv {} {}", local_archive, remote_archive),
         format!("cd {} && mv dist dist_backup_{}", deploy_path, timestamp),
         format!("cd {} && tar -xzf {}", deploy_path, remote_archive),
         if delete_old {
