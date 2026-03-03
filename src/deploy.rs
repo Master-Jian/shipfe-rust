@@ -100,19 +100,22 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, deploy_path: &s
 
     // 认证
     log_message("正在进行SSH认证");
-    if let Some(password) = &server.password {
-        sess.userauth_password(&server.username, password).map_err(|e| {
-            log_message(&format!("SSH密码认证失败: {}", e));
-            LicenseError::Invalid(e.to_string())
-        })?;
+    let auth_success = if let Some(password) = &server.password {
+        log_message("尝试密码认证");
+        sess.userauth_password(&server.username, password).is_ok()
+    } else if let Ok(private_key) = std::env::var("SSH_PRIVATE_KEY") {
+        log_message("尝试SSH私钥认证");
+        sess.userauth_pubkey_memory(&server.username, None, &private_key, None).is_ok()
     } else if let Some(key_path) = &server.key_path {
-        sess.userauth_pubkey_file(&server.username, None, std::path::Path::new(key_path), None).map_err(|e| {
-            log_message(&format!("SSH密钥认证失败: {}", e));
-            LicenseError::Invalid(e.to_string())
-        })?;
+        log_message("尝试SSH密钥文件认证");
+        sess.userauth_pubkey_file(&server.username, None, std::path::Path::new(key_path), None).is_ok()
     } else {
-        log_message("未提供认证方法");
-        return Err(LicenseError::Invalid("No authentication method provided".to_string()));
+        false
+    };
+
+    if !auth_success {
+        log_message("所有SSH认证方法都失败了");
+        return Err(LicenseError::Invalid("SSH authentication failed".to_string()));
     }
     log_message("SSH认证成功");
 

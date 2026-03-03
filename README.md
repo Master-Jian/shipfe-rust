@@ -59,6 +59,27 @@ Edit `shipfe.config.json` to configure your deployment settings:
 }
 ```
 
+### Authentication
+
+Shipfe supports multiple SSH authentication methods (tried in order):
+
+1. **Password authentication**: Set `password` in server config
+2. **SSH Private Key from environment**: Set `SSH_PRIVATE_KEY` environment variable
+3. **SSH Key file**: Set `key_path` in server config
+
+```bash
+# Using password (in config)
+shipfe deploy --profile dev
+
+# Using SSH private key from environment
+export SSH_PRIVATE_KEY="$(cat ~/.ssh/id_rsa)"
+shipfe deploy --profile dev
+
+# Using SSH key file (in config)
+# Set "key_path": "/path/to/private/key" in server config
+shipfe deploy --profile dev
+```
+
 ## Features
 
 - Multiple environment support
