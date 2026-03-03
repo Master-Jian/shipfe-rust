@@ -97,6 +97,8 @@ Each server can have its own authentication method. Shipfe tries authentication 
       "remote_tmp": "/tmp"
     }
   }
+}
+
 ### Sub-environments
 
 For deploying multiple applications or different configurations to the same server, use sub-environments:
