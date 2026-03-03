@@ -97,13 +97,53 @@ Each server can have its own authentication method. Shipfe tries authentication 
       "remote_tmp": "/tmp"
     }
   }
+### Sub-environments
+
+For deploying multiple applications or different configurations to the same server, use sub-environments:
+
+```json
+{
+  "environments": {
+    "dev": {
+      "build_command": "npm run build",
+      "local_dist_path": "./dist",
+      "servers": [
+        {
+          "host": "dev.example.com",
+          "port": 22,
+          "username": "deploy",
+          "remote_deploy_path": "/var/www/dev",
+          "delete_old": false
+        }
+      ],
+      "remote_tmp": "/tmp",
+      "sub_environments": {
+        "admin": {
+          "build_command": "npm run build:admin",
+          "remote_deploy_path": "/var/www/dev/admin"
+        },
+        "shop": {
+          "build_command": "npm run build:shop",
+          "remote_deploy_path": "/var/www/dev/shop"
+        },
+        "cu": {
+          "build_command": "npm run build:cu",
+          "remote_deploy_path": "/var/www/dev/cu"
+        }
+      }
+    }
+  }
 }
 ```
 
-In this example:
-- `web1.prod.com` uses password authentication
-- `web2.prod.com` uses SSH key file `/home/user/.ssh/web2_key`
-- `web3.prod.com` uses SSH key file `/home/user/.ssh/web3_key`
+Deploy to sub-environments:
+```bash
+shipfe deploy --profile dev-admin
+shipfe deploy --profile dev-shop
+shipfe deploy --profile dev-cu
+```
+
+Sub-environments inherit settings from the parent environment and can override `build_command`, `local_dist_path`, and `remote_deploy_path`.
 
 **Or use environment variable for all servers:**
 ```bash
