@@ -42,43 +42,126 @@ Edit `shipfe.config.json` to configure your deployment settings:
           "host": "dev.example.com",
           "port": 22,
           "username": "deploy",
-          "password": "your_password",
           "remote_deploy_path": "/var/www/dev",
           "delete_old": false
         }
       ],
-      "remote_tmp": "/tmp",
-      "sub_environments": {
-        "admin": {
-          "build_command": "npm run build:admin",
-          "remote_deploy_path": "/var/www/dev/admin"
-        }
-      }
+      "remote_tmp": "/tmp"
     }
   }
 }
 ```
 
+#### Authentication Options
+
+Each server can have its own authentication method. Shipfe tries authentication methods in this order:
+
+1. **Password** (if `password` is set in server config)
+2. **SSH Private Key from environment** (if `SSH_PRIVATE_KEY` env var is set)
+3. **SSH Key file** (if `key_path` is set in server config)
+
+**Example with multiple servers using different auth methods:**
+
+```json
+{
+  "environments": {
+    "prod": {
+      "build_command": "npm run build",
+      "local_dist_path": "./dist",
+      "servers": [
+        {
+          "host": "web1.prod.com",
+          "port": 22,
+          "username": "deploy",
+          "password": "web1_password",
+          "remote_deploy_path": "/var/www/prod",
+          "delete_old": false
+        },
+        {
+          "host": "web2.prod.com",
+          "port": 22,
+          "username": "deploy",
+          "key_path": "/home/user/.ssh/web2_key",
+          "remote_deploy_path": "/var/www/prod",
+          "delete_old": false
+        },
+        {
+          "host": "web3.prod.com",
+          "port": 22,
+          "username": "deploy",
+          "key_path": "/home/user/.ssh/web3_key",
+          "remote_deploy_path": "/var/www/prod",
+          "delete_old": false
+        }
+      ],
+      "remote_tmp": "/tmp"
+    }
+  }
+}
+```
+
+In this example:
+- `web1.prod.com` uses password authentication
+- `web2.prod.com` uses SSH key file `/home/user/.ssh/web2_key`
+- `web3.prod.com` uses SSH key file `/home/user/.ssh/web3_key`
+
+**Or use environment variable for all servers:**
+```bash
+export SSH_PRIVATE_KEY="$(cat ~/.ssh/prod_key)"
+shipfe deploy --profile prod
+```
+
 ### Authentication
 
-Shipfe supports multiple SSH authentication methods (tried in order):
+Shipfe supports multiple SSH authentication methods for each server individually. For each server, authentication methods are tried in this order:
 
-1. **Password authentication**: Set `password` in server config
-2. **SSH Private Key from environment**: Set `SSH_PRIVATE_KEY` environment variable
-3. **SSH Key file**: Set `key_path` in server config
+1. **Password authentication**: If `password` is set in that server's config
+2. **SSH Private Key from environment**: If `SSH_PRIVATE_KEY` environment variable is set (applies to all servers)
+3. **SSH Key file**: If `key_path` is set in that server's config
+
+#### Usage Examples:
 
 ```bash
-# Using password (in config)
-shipfe deploy --profile dev
+# Each server can use different authentication
+shipfe deploy --profile prod
 
-# Using SSH private key from environment
-export SSH_PRIVATE_KEY="$(cat ~/.ssh/id_rsa)"
-shipfe deploy --profile dev
-
-# Using SSH key file (in config)
-# Set "key_path": "/path/to/private/key" in server config
-shipfe deploy --profile dev
+# Or override with environment variable for all servers
+export SSH_PRIVATE_KEY="$(cat ~/.ssh/prod_key)"
+shipfe deploy --profile prod
 ```
+
+#### SSH Key Setup for Individual Servers:
+
+1. **Generate SSH key pairs** for each server:
+   ```bash
+   # For server 1
+   ssh-keygen -t rsa -b 4096 -f ~/.ssh/server1_key -C "server1"
+
+   # For server 2
+   ssh-keygen -t rsa -b 4096 -f ~/.ssh/server2_key -C "server2"
+   ```
+
+2. **Copy public keys to respective servers**:
+   ```bash
+   ssh-copy-id -i ~/.ssh/server1_key.pub user@server1.com
+   ssh-copy-id -i ~/.ssh/server2_key.pub user@server2.com
+   ```
+
+3. **Configure shipfe** with server-specific keys:
+   ```json
+   {
+     "servers": [
+       {
+         "host": "server1.com",
+         "key_path": "~/.ssh/server1_key"
+       },
+       {
+         "host": "server2.com",
+         "key_path": "~/.ssh/server2_key"
+       }
+     ]
+   }
+   ```
 
 ## Features
 
