@@ -141,12 +141,12 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, deploy_path: &s
 
     let commands = vec![
         format!("mkdir -p {}", deploy_path),
-        format!("cd {} && mv dist dist_backup_{}", deploy_path, timestamp),
+        format!("cd {} && [ -d dist ] && mv dist dist_backup_{} || true", deploy_path, timestamp),
         format!("cd {} && tar -xzf {}", deploy_path, remote_archive),
         if delete_old {
-            format!("cd {} && rm -rf dist_backup_{}", deploy_path, timestamp)
+            format!("cd {} && [ -d dist_backup_{} ] && rm -rf dist_backup_{} || true", deploy_path, timestamp, timestamp)
         } else {
-            format!("cd {} && mv dist_backup_{} old_dist_{}", deploy_path, timestamp, timestamp)
+            format!("cd {} && [ -d dist_backup_{} ] && mv dist_backup_{} old_dist_{} || true", deploy_path, timestamp, timestamp, timestamp)
         },
         format!("rm {}", remote_archive),
     ];
