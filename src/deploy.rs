@@ -5,7 +5,7 @@ use flate2::Compression;
 use flate2::write::GzEncoder;
 use ssh2::Session;
 use std::net::TcpStream;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 
 
 use crate::config::ServerConfig;
@@ -53,6 +53,11 @@ pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), LicenseEr
         run_build_command(build_cmd)?;
     }
 
+    // 获取dist目录的修改时间作为timestamp
+    let dist_metadata = metadata(&config.local_dist_path).map_err(|e| LicenseError::Invalid(format!("Failed to get file metadata: {}", e)))?;
+    let dist_mtime = dist_metadata.modified().map_err(|e| LicenseError::Invalid(format!("Failed to get file mtime: {}", e)))?;
+    let timestamp = DateTime::<Utc>::from(dist_mtime).format("%Y%m%d_%H%M%S").to_string();
+
     // 压缩dist目录
     let archive_path = "/tmp/dist.tar.gz";
     log_message(&format!("Compressing {} to {}", config.local_dist_path, archive_path));
@@ -65,7 +70,7 @@ pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), LicenseEr
     }
 
     let server = &config.servers[0];
-    upload_and_deploy(server, archive_path, &server.remote_deploy_path, &config.remote_tmp, server.delete_old)?;
+    upload_and_deploy(server, archive_path, &server.remote_deploy_path, &config.remote_tmp, server.delete_old, &timestamp)?;
 
     log_message("Deployment completed successfully");
     Ok(())
@@ -82,7 +87,7 @@ fn compress_dist(dist_path: &str, output_path: &str) -> Result<(), LicenseError>
     Ok(())
 }
 
-fn upload_and_deploy(server: &ServerConfig, local_archive: &str, deploy_path: &str, remote_tmp: &str, delete_old: bool) -> Result<(), LicenseError> {
+fn upload_and_deploy(server: &ServerConfig, local_archive: &str, deploy_path: &str, remote_tmp: &str, delete_old: bool, timestamp: &str) -> Result<(), LicenseError> {
     log_message(&format!("Connecting to server {}:{}", server.host, server.port));
     let tcp = TcpStream::connect(format!("{}:{}", server.host, server.port)).map_err(|e| {
         log_message(&format!("Connection failed: {}", e));
@@ -202,8 +207,6 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, deploy_path: &s
     log_message("File verification successful");
 
     // 执行部署命令
-    let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
-
     let commands = vec![
         format!("mkdir -p {}", deploy_path),
         format!("cd {} && [ -d dist ] && mv dist dist_backup_{} || true", deploy_path, timestamp),
