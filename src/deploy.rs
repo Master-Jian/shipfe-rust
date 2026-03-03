@@ -1,4 +1,4 @@
-use std::fs::{File, OpenOptions};
+use std::fs::{metadata, File, OpenOptions};
 use std::io::{self, Read, Write};
 use tar::Builder;
 use flate2::Compression;
@@ -122,7 +122,8 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, deploy_path: &s
     // 上传文件
     log_message("Uploading files to server");
     let remote_archive = format!("{}/dist.tar.gz", remote_tmp);
-    let mut remote_file = sess.scp_send(std::path::Path::new(&remote_archive), 0o644, local_archive.len() as u64, None).map_err(|e| {
+    let file_size = metadata(local_archive).map_err(|e| LicenseError::Invalid(e.to_string()))?.len();
+    let mut remote_file = sess.scp_send(std::path::Path::new(&remote_archive), 0o644, file_size, None).map_err(|e| {
         log_message(&format!("File upload initialization failed: {}", e));
         LicenseError::Invalid(e.to_string())
     })?;
@@ -130,10 +131,14 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, deploy_path: &s
         log_message(&format!("Local file open failed: {}", e));
         LicenseError::Invalid(e.to_string())
     })?;
-    io::copy(&mut local_file, &mut remote_file).map_err(|e| {
+    let bytes_copied = io::copy(&mut local_file, &mut remote_file).map_err(|e| {
         log_message(&format!("File upload failed: {}", e));
         LicenseError::Invalid(e.to_string())
     })?;
+    if bytes_copied != file_size {
+        log_message(&format!("File upload incomplete: copied {} bytes, expected {}", bytes_copied, file_size));
+        return Err(LicenseError::Invalid("File upload incomplete".to_string()));
+    }
     log_message("File upload successful");
 
     // 验证上传的文件是否存在
@@ -166,6 +171,35 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, deploy_path: &s
             log_message(&format!("Verification output: {}", output.trim()));
         }
     }
+
+    // Ensure the file exists before proceeding
+    let check_cmd = format!("test -f {} && echo 'OK' || echo 'FAIL'", remote_archive);
+    log_message(&format!("Final file existence check: {}", check_cmd));
+    let mut channel = sess.channel_session().map_err(|e| {
+        log_message(&format!("SSH channel creation failed: {}", e));
+        LicenseError::Invalid(e.to_string())
+    })?;
+    channel.exec(&check_cmd).map_err(|e| {
+        log_message(&format!("File check command failed: {}", e));
+        LicenseError::Invalid(e.to_string())
+    })?;
+    let mut output = String::new();
+    channel.read_to_string(&mut output).map_err(|e| {
+        log_message(&format!("Reading file check output failed: {}", e));
+        LicenseError::Invalid(e.to_string())
+    })?;
+    channel.wait_close().map_err(|e| {
+        log_message(&format!("Waiting for file check completion failed: {}", e));
+        LicenseError::Invalid(e.to_string())
+    })?;
+    if channel.exit_status().map_err(|e| {
+        log_message(&format!("Getting file check exit status failed: {}", e));
+        LicenseError::Invalid(e.to_string())
+    })? != 0 || !output.trim().contains("OK") {
+        log_message(&format!("Uploaded file verification failed. Output: {}", output.trim()));
+        return Err(LicenseError::Invalid("Uploaded file not found on server".to_string()));
+    }
+    log_message("File verification successful");
 
     // 执行部署命令
     let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
