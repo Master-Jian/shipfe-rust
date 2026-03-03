@@ -1,0 +1,12 @@
+target/
+Cargo.toml
+Cargo.lock
+src/
+.git/
+.gitignore
+*.rs
+*.log
+shipfe.config.json
+deploy.default.json
+license.json
+deploy.prod.json

@@ -1,0 +1,33 @@
+{
+  "name": "shipfe",
+  "version": "0.1.0",
+  "description": "A deployment tool for web applications",
+  "main": "index.js",
+  "bin": {
+    "shipfe": "bin/shipfe"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "deployment",
+    "devops",
+    "ssh",
+    "ci-cd"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/shipfe.git"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}
