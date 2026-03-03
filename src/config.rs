@@ -67,5 +67,44 @@ pub fn create_default_config() -> Result<(), crate::LicenseError> {
     std::fs::write("shipfe.config.json", config_json)
         .map_err(|e| crate::LicenseError::Invalid(e.to_string()))?;
 
+    // Handle .gitignore file
+    update_gitignore()?;
+
+    Ok(())
+}
+
+fn update_gitignore() -> Result<(), crate::LicenseError> {
+    let gitignore_path = ".gitignore";
+    let entries_to_add = vec!["shipfe.log", "shipfe.config.json"];
+
+    match std::fs::read_to_string(gitignore_path) {
+        Ok(content) => {
+            // .gitignore exists, check if entries are already there
+            let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+            let mut modified = false;
+
+            for entry in &entries_to_add {
+                if !lines.iter().any(|line| line.trim() == *entry) {
+                    lines.push(entry.to_string());
+                    modified = true;
+                }
+            }
+
+            if modified {
+                let new_content = lines.join("\n") + "\n";
+                std::fs::write(gitignore_path, new_content)
+                    .map_err(|e| crate::LicenseError::Invalid(e.to_string()))?;
+                println!("Updated .gitignore with shipfe-related entries");
+            }
+        }
+        Err(_) => {
+            // .gitignore doesn't exist, create it with the entries
+            let content = entries_to_add.join("\n") + "\n";
+            std::fs::write(gitignore_path, content)
+                .map_err(|e| crate::LicenseError::Invalid(e.to_string()))?;
+            println!("Created .gitignore with shipfe-related entries");
+        }
+    }
+
     Ok(())
 }

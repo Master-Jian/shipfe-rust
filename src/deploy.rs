@@ -137,6 +137,7 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, deploy_path: &s
     let remote_archive = format!("{}/dist.tar.gz", remote_tmp);
 
     let commands = vec![
+        format!("mkdir -p {}", deploy_path),
         format!("mv {} {}", local_archive, remote_archive),
         format!("cd {} && mv dist dist_backup_{}", deploy_path, timestamp),
         format!("cd {} && tar -xzf {}", deploy_path, remote_archive),
