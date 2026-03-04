@@ -25,6 +25,12 @@ shipfe deploy --profile dev
 
 # Deploy to sub-environment
 shipfe deploy --profile dev-admin
+
+# Deploy to all sub-environments
+shipfe deploy --profile dev --all-sub
+
+# Atomic deployment (creates releases/timestamp and updates current symlink)
+shipfe deploy --atomic
 ```
 
 ### Configuration
@@ -143,6 +149,9 @@ Deploy to sub-environments:
 shipfe deploy --profile dev-admin
 shipfe deploy --profile dev-shop
 shipfe deploy --profile dev-cu
+
+# Deploy to all sub-environments at once
+shipfe deploy --profile dev --all-sub
 ```
 
 ### Deploy all sub-environments at once
@@ -153,6 +162,30 @@ shipfe deploy --profile dev --all-sub
 This will deploy to all sub-environments (admin, shop, cu) in sequence.
 
 Sub-environments inherit settings from the parent environment and can override `build_command`, `local_dist_path`, and `remote_deploy_path`.
+
+### Atomic Deployment
+
+Shipfe supports atomic deployment to minimize downtime. When using `--atomic`, the deployment creates a timestamped release directory and updates a `current` symlink for zero-downtime switching.
+
+```bash
+# Atomic deployment to default environment
+shipfe deploy --atomic
+
+# Atomic deployment to specific environment
+shipfe deploy --profile prod --atomic
+```
+
+**Directory Structure:**
+```
+remote_deploy_path/
+├── releases/
+│   ├── 20260303_034945/
+│   ├── 20260303_035012/
+│   └── 20260303_035045/
+└── current -> releases/20260303_035045
+```
+
+Your web server should serve from `remote_deploy_path/current`.
 
 **Or use environment variable for all servers:**
 ```bash
