@@ -24,6 +24,10 @@
     "url": "git+https://github.com/Master-Jian/shipfe-rust.git"
   },
   "license": "MIT",
+  "files": [
+    "bin/",
+    "README.md"
+  ],
   "os": [
     "darwin",
     "linux",
