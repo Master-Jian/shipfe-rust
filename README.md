@@ -17,6 +17,9 @@ A powerful, **free**, **Rust-based** deployment tool for web applications that *
 - 📦 **Sub-Environment Support**: Deploy multiple apps to the same server
 - 🔑 **Flexible Authentication**: SSH key, password, or environment variable authentication
 - 📝 **Detailed Logging**: Comprehensive deployment logs for troubleshooting
+- 🗂️ **Shared Asset Management**: Deduplicate hashed static assets across releases
+- 📊 **Resource Snapshot**: Generate deployment snapshots with file manifests
+- 🧹 **Automatic Cleanup**: Configurable retention of old releases and unused assets
 
 ## Installation
 
@@ -87,11 +90,14 @@ Edit `shipfe.config.json` to configure your deployment settings:
           "host": "dev.example.com",
           "port": 22,
           "username": "deploy",
-          "remote_deploy_path": "/var/www/dev",
-          "delete_old": false
+          "remote_deploy_path": "/var/www/dev"
         }
       ],
-      "remote_tmp": "/tmp"
+      "remote_tmp": "/tmp",
+      "hashed_asset_patterns": ["assets/"],
+      "enable_shared": true,
+      "keep_releases": 5,
+      "delete_old": false
     }
   }
 }
@@ -159,11 +165,14 @@ For deploying multiple applications or different configurations to the same serv
           "host": "dev.example.com",
           "port": 22,
           "username": "deploy",
-          "remote_deploy_path": "/var/www/dev",
-          "delete_old": false
+          "remote_deploy_path": "/var/www/dev"
         }
       ],
       "remote_tmp": "/tmp",
+      "hashed_asset_patterns": ["assets/"],
+      "enable_shared": true,
+      "keep_releases": 5,
+      "delete_old": false,
       "sub_environments": {
         "admin": {
           "build_command": "npm run build:admin",
@@ -193,14 +202,48 @@ shipfe deploy --profile dev-cu
 shipfe deploy --profile dev --all-sub
 ```
 
-### Deploy all sub-environments at once
-```bash
-shipfe deploy --profile dev --all-sub
+### Shared Assets Management
+
+Shipfe supports deduplication of hashed static assets across releases to save disk space and bandwidth. When `enable_shared` is set to `true`, hashed assets are stored in a shared directory and hard-linked in each release.
+
+**Configuration:**
+```json
+{
+  "environments": {
+    "prod": {
+      "enable_shared": true,
+      "hashed_asset_patterns": ["assets/"],
+      "keep_releases": 5,
+      "delete_old": false
+    }
+  }
+}
 ```
 
-This will deploy to all sub-environments (admin, shop, cu) in sequence.
+**Features:**
+- **Automatic Detection**: Detects hashed files based on patterns or filename format (`-hash.ext`)
+- **Deduplication**: Same hashed assets are shared across releases
+- **Cleanup**: Unused assets are automatically removed when no longer referenced
+- **Retention**: Configurable number of releases to keep (`keep_releases`)
 
-Sub-environments inherit settings from the parent environment and can override `build_command`, `local_dist_path`, and `remote_deploy_path`.
+### Resource Snapshots
+
+Each deployment generates a `shipfe.snapshot.json` file containing the complete manifest of deployed files and hashed assets.
+
+**Example snapshot:**
+```json
+{
+  "id": "20260303_035045",
+  "timestamp": "2026-03-03T03:50:45Z",
+  "files": ["index.html", "assets/app-abc123.js", "assets/style-def456.css"],
+  "hashed_assets": ["assets/app-abc123.js", "assets/style-def456.css"]
+}
+```
+
+This enables:
+- **Asset tracking**: Know exactly what files are deployed
+- **Integrity verification**: Verify deployed files match build output
+- **Rollback validation**: Ensure rollback targets have correct assets
 
 ### Atomic Deployment
 
@@ -219,8 +262,16 @@ shipfe deploy --profile prod --atomic
 remote_deploy_path/
 ├── releases/
 │   ├── 20260303_034945/
+│   │   ├── index.html
+│   │   ├── assets/
+│   │   │   └── app.js -> ../../../shared/assets/app-abc123.js
+│   │   └── shipfe.snapshot.json
 │   ├── 20260303_035012/
 │   └── 20260303_035045/
+├── shared/
+│   └── assets/
+│       ├── app-abc123.js
+│       └── style-def456.css
 └── current -> releases/20260303_035045
 ```
 
@@ -292,6 +343,10 @@ shipfe deploy --profile prod
 - SSH-based deployment
 - Automatic backup and rollback
 - Detailed logging
+- Shared asset deduplication
+- Resource snapshot generation
+- Configurable release retention
+- Automatic cleanup of unused assets
 
 ## License
 

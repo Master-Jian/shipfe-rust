@@ -134,7 +134,7 @@ pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), crate::Ap
 
     // Support multiple servers in open source version
     for server in &config.servers {
-        upload_and_deploy(server, &archive_path, &server.remote_deploy_path, &config.remote_tmp, &timestamp, config.enable_shared, config.keep_releases, &config.local_dist_path)?;
+        upload_and_deploy(server, &archive_path, &server.remote_deploy_path, &config.remote_tmp, &timestamp, config.enable_shared, config.keep_releases, config.delete_old, &config.local_dist_path)?;
     }
 
     log_message("Deployment completed successfully");
@@ -152,7 +152,7 @@ fn compress_dist(dist_path: &str, output_path: &str) -> Result<(), crate::AppErr
     Ok(())
 }
 
-fn upload_and_deploy(server: &ServerConfig, local_archive: &str, remote_deploy_path: &str, remote_tmp: &str, timestamp: &str, enable_shared: bool, keep_releases: u32, local_dist_path: &str) -> Result<(), crate::AppError> {
+fn upload_and_deploy(server: &ServerConfig, local_archive: &str, remote_deploy_path: &str, remote_tmp: &str, timestamp: &str, enable_shared: bool, keep_releases: u32, delete_old: bool, local_dist_path: &str) -> Result<(), crate::AppError> {
     // 读取本地 snapshot 获取 hashed_assets
     let local_snapshot_path = format!("{}/shipfe.snapshot.json", local_dist_path);
     let hashed_assets: Vec<String> = if enable_shared {
@@ -304,8 +304,12 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, remote_deploy_p
         }
     }
     commands.push(format!("cd {} && ln -sfn releases/{} current", remote_deploy_path, timestamp));
-    // 清理旧 releases，只保留最新的 keep_releases 个
-    commands.push(format!("cd {} && ls -t releases/ | tail -n +{} | xargs -I {{}} rm -rf releases/{{}}", remote_deploy_path, keep_releases + 1));
+    if delete_old {
+        commands.push(format!("cd {} && for dir in releases/*; do if [ \"$dir\" != \"releases/{}\" ]; then rm -rf \"$dir\"; fi; done", remote_deploy_path, timestamp));
+    } else {
+        // 清理旧 releases，只保留最新的 keep_releases 个
+        commands.push(format!("cd {} && ls -t releases/ | tail -n +{} | xargs -I {{}} rm -rf releases/{{}}", remote_deploy_path, keep_releases + 1));
+    }
     if enable_shared {
         // 收集所有保留 releases 的 hashed_assets
         commands.push(format!("cd {} && find releases/ -name 'shipfe.snapshot.json' -exec cat {{}} \\; | jq -r '.hashed_assets[]' | sort | uniq > /tmp/current_hashes.txt", remote_deploy_path));
