@@ -41,7 +41,7 @@ pub struct GlobalConfig {
     pub environments: HashMap<String, EnvironmentConfig>,
 }
 
-pub fn create_default_config() -> Result<(), crate::LicenseError> {
+pub fn create_default_config() -> Result<(), crate::AppError> {
     let mut environments = HashMap::new();
     environments.insert("default".to_string(), EnvironmentConfig {
         build_command: Some("npm run build".to_string()),
@@ -62,10 +62,10 @@ pub fn create_default_config() -> Result<(), crate::LicenseError> {
     let global_config = GlobalConfig { environments };
 
     let config_json = serde_json::to_string_pretty(&global_config)
-        .map_err(|e| crate::LicenseError::Invalid(e.to_string()))?;
+        .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
 
     std::fs::write("shipfe.config.json", config_json)
-        .map_err(|e| crate::LicenseError::Invalid(e.to_string()))?;
+        .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
 
     // Handle .gitignore file
     update_gitignore()?;
@@ -73,7 +73,7 @@ pub fn create_default_config() -> Result<(), crate::LicenseError> {
     Ok(())
 }
 
-fn update_gitignore() -> Result<(), crate::LicenseError> {
+fn update_gitignore() -> Result<(), crate::AppError> {
     let gitignore_path = ".gitignore";
     let entries_to_add = vec!["shipfe.log", "shipfe.config.json"];
 
@@ -93,7 +93,7 @@ fn update_gitignore() -> Result<(), crate::LicenseError> {
             if modified {
                 let new_content = lines.join("\n") + "\n";
                 std::fs::write(gitignore_path, new_content)
-                    .map_err(|e| crate::LicenseError::Invalid(e.to_string()))?;
+                    .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
                 println!("Updated .gitignore with shipfe-related entries");
             }
         }
@@ -101,7 +101,7 @@ fn update_gitignore() -> Result<(), crate::LicenseError> {
             // .gitignore doesn't exist, create it with the entries
             let content = entries_to_add.join("\n") + "\n";
             std::fs::write(gitignore_path, content)
-                .map_err(|e| crate::LicenseError::Invalid(e.to_string()))?;
+                .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
             println!("Created .gitignore with shipfe-related entries");
         }
     }

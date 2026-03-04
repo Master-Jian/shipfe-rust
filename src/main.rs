@@ -1,11 +1,16 @@
-mod license;
 mod config;
 mod deploy;
 
 use clap::{Parser, Subcommand};
-use license::LicenseError;
+use thiserror::Error;
 use config::create_default_config;
 use deploy::deploy_free;
+
+#[derive(Error, Debug)]
+pub enum AppError {
+    #[error("invalid: {0}")]
+    Invalid(String),
+}
 
 #[derive(Parser)]
 #[command(name = "shipfe", version)]
@@ -50,7 +55,7 @@ fn main() {
         std::process::exit(1);
     }
 }
-fn run() -> Result<(), LicenseError> {
+fn run() -> Result<(), AppError> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -71,11 +76,11 @@ fn run() -> Result<(), LicenseError> {
             let config_path = config.unwrap_or_else(|| "shipfe.config.json".to_string());
 
             let config_raw = std::fs::read_to_string(&config_path).map_err(|e| {
-                LicenseError::Invalid(format!("Failed to read config {}: {}", config_path, e))
+                AppError::Invalid(format!("Failed to read config {}: {}", config_path, e))
             })?;
 
             let global_config: crate::config::GlobalConfig = serde_json::from_str(&config_raw)
-                .map_err(|e| LicenseError::Invalid(format!("config parse error: {e}")))?;
+                .map_err(|e| AppError::Invalid(format!("config parse error: {e}")))?;
 
             // 支持 profile-sub 格式，如 dev-admin
             let (base_profile, sub) = if profile.contains('-') {
@@ -91,7 +96,7 @@ fn run() -> Result<(), LicenseError> {
                 .environments
                 .get(&base_profile)
                 .ok_or_else(|| {
-                    LicenseError::Invalid(format!(
+                    AppError::Invalid(format!(
                         "Environment '{}' not found in config",
                         base_profile
                     ))
@@ -134,7 +139,7 @@ fn run() -> Result<(), LicenseError> {
                 let final_config = if let Some(sub_name) = &sub {
                     if let Some(sub_envs) = &env_config.sub_environments {
                         let sub_config = sub_envs.get(sub_name).ok_or_else(|| {
-                            LicenseError::Invalid(format!(
+                            AppError::Invalid(format!(
                                 "Sub-environment '{}' not found in '{}'",
                                 sub_name, base_profile
                             ))
@@ -158,7 +163,7 @@ fn run() -> Result<(), LicenseError> {
                             remote_tmp: env_config.remote_tmp.clone(),
                         }
                     } else {
-                        return Err(LicenseError::Invalid(format!(
+                        return Err(AppError::Invalid(format!(
                             "No sub-environments defined for '{}'",
                             base_profile
                         )));
@@ -187,14 +192,14 @@ fn run() -> Result<(), LicenseError> {
 
         Commands::Rollback { profile, to } => {
             // All features are now free and open source
-            let to_version = to.ok_or_else(|| LicenseError::Invalid("rollback requires --to parameter".to_string()))?;
+            let to_version = to.ok_or_else(|| AppError::Invalid("rollback requires --to parameter".to_string()))?;
 
             let config_path = "shipfe.config.json".to_string();
             let config_raw = std::fs::read_to_string(&config_path).map_err(|e| {
-                LicenseError::Invalid(format!("Failed to read config {}: {}", config_path, e))
+                AppError::Invalid(format!("Failed to read config {}: {}", config_path, e))
             })?;
             let global_config: crate::config::GlobalConfig = serde_json::from_str(&config_raw)
-                .map_err(|e| LicenseError::Invalid(format!("config parse error: {e}")))?;
+                .map_err(|e| AppError::Invalid(format!("config parse error: {e}")))?;
 
             let (base_profile, sub) = if profile.contains('-') {
                 let mut it = profile.splitn(2, '-');
@@ -209,7 +214,7 @@ fn run() -> Result<(), LicenseError> {
                 .environments
                 .get(&base_profile)
                 .ok_or_else(|| {
-                    LicenseError::Invalid(format!(
+                    AppError::Invalid(format!(
                         "Environment '{}' not found in config",
                         base_profile
                     ))
@@ -218,7 +223,7 @@ fn run() -> Result<(), LicenseError> {
             if let Some(sub_name) = &sub {
                 if let Some(sub_envs) = &env_config.sub_environments {
                     let sub_config = sub_envs.get(sub_name).ok_or_else(|| {
-                        LicenseError::Invalid(format!(
+                        AppError::Invalid(format!(
                             "Sub-environment '{}' not found in '{}'",
                             sub_name, base_profile
                         ))
@@ -230,7 +235,7 @@ fn run() -> Result<(), LicenseError> {
                         deploy::rollback_to_version(server, &sub_config.remote_deploy_path, &to_version)?;
                     }
                 } else {
-                    return Err(LicenseError::Invalid(format!(
+                    return Err(AppError::Invalid(format!(
                         "No sub-environments defined for '{}'",
                         base_profile
                     )));

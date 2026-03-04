@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 
 
 use crate::config::ServerConfig;
-use crate::LicenseError;
+use crate::AppError;
 
 fn log_message(message: &str) {
     let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S");
@@ -20,7 +20,7 @@ fn log_message(message: &str) {
     }
 }
 
-fn run_build_command(cmd: &str) -> Result<(), LicenseError> {
+fn run_build_command(cmd: &str) -> Result<(), crate::AppError> {
     log_message(&format!("Running build command: {}", cmd));
     use std::process::Command;
     let output = Command::new("sh")
@@ -29,7 +29,7 @@ fn run_build_command(cmd: &str) -> Result<(), LicenseError> {
         .output()
         .map_err(|e| {
             log_message(&format!("Build command execution failed: {}", e));
-            LicenseError::Invalid(format!("Failed to run build command: {}", e))
+            crate::AppError::Invalid(format!("Failed to run build command: {}", e))
         })?;
     
     if output.status.success() {
@@ -42,20 +42,20 @@ fn run_build_command(cmd: &str) -> Result<(), LicenseError> {
         if !output.stderr.is_empty() {
             log_message(&format!("Build error: {}", String::from_utf8_lossy(&output.stderr)));
         }
-        return Err(LicenseError::Invalid(format!("Build command failed: {}", cmd)));
+        return Err(crate::AppError::Invalid(format!("Build command failed: {}", cmd)));
     }
     Ok(())
 }
 
-pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), LicenseError> {
+pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), crate::AppError> {
     // 执行打包命令
     if let Some(build_cmd) = &config.build_command {
         run_build_command(build_cmd)?;
     }
 
     // 获取dist目录的修改时间作为timestamp
-    let dist_metadata = metadata(&config.local_dist_path).map_err(|e| LicenseError::Invalid(format!("Failed to get file metadata: {}", e)))?;
-    let dist_mtime = dist_metadata.modified().map_err(|e| LicenseError::Invalid(format!("Failed to get file mtime: {}", e)))?;
+    let dist_metadata = metadata(&config.local_dist_path).map_err(|e| crate::AppError::Invalid(format!("Failed to get file metadata: {}", e)))?;
+    let dist_mtime = dist_metadata.modified().map_err(|e| crate::AppError::Invalid(format!("Failed to get file mtime: {}", e)))?;
     let timestamp = DateTime::<Utc>::from(dist_mtime).format("%Y%m%d_%H%M%S").to_string();
 
     // 压缩dist目录
@@ -73,31 +73,31 @@ pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), LicenseEr
     Ok(())
 }
 
-fn compress_dist(dist_path: &str, output_path: &str) -> Result<(), LicenseError> {
-    let file = File::create(output_path).map_err(|e| LicenseError::Invalid(e.to_string()))?;
+fn compress_dist(dist_path: &str, output_path: &str) -> Result<(), crate::AppError> {
+    let file = File::create(output_path).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
     let enc = GzEncoder::new(file, Compression::default());
     let mut tar = Builder::new(enc);
 
-    tar.append_dir_all("dist", dist_path).map_err(|e| LicenseError::Invalid(e.to_string()))?;
-    tar.finish().map_err(|e| LicenseError::Invalid(e.to_string()))?;
+    tar.append_dir_all("dist", dist_path).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+    tar.finish().map_err(|e| crate::AppError::Invalid(e.to_string()))?;
 
     Ok(())
 }
 
-fn upload_and_deploy(server: &ServerConfig, local_archive: &str, remote_deploy_path: &str, remote_tmp: &str, delete_old: bool, timestamp: &str) -> Result<(), LicenseError> {
+fn upload_and_deploy(server: &ServerConfig, local_archive: &str, remote_deploy_path: &str, remote_tmp: &str, delete_old: bool, timestamp: &str) -> Result<(), crate::AppError> {
     let deploy_path = format!("{}/releases", remote_deploy_path);
     log_message(&format!("Connecting to server {}:{}", server.host, server.port));
     let tcp = TcpStream::connect(format!("{}:{}", server.host, server.port)).map_err(|e| {
         log_message(&format!("Connection failed: {}", e));
-        LicenseError::Invalid(e.to_string())
+        crate::AppError::Invalid(e.to_string())
     })?;
     log_message("Connection successful");
-    let mut sess = Session::new().map_err(|e| LicenseError::Invalid(e.to_string()))?;
+    let mut sess = Session::new().map_err(|e| crate::AppError::Invalid(e.to_string()))?;
     sess.set_tcp_stream(tcp);
     log_message("Performing SSH handshake");
     sess.handshake().map_err(|e| {
         log_message(&format!("SSH handshake failed: {}", e));
-        LicenseError::Invalid(e.to_string())
+        crate::AppError::Invalid(e.to_string())
     })?;
     log_message("SSH handshake successful");
 
@@ -118,29 +118,29 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, remote_deploy_p
 
     if !auth_success {
         log_message("All SSH authentication methods failed");
-        return Err(LicenseError::Invalid("SSH authentication failed".to_string()));
+        return Err(crate::AppError::Invalid("SSH authentication failed".to_string()));
     }
     log_message("SSH authentication successful");
 
     // 上传文件
     log_message("Uploading files to server");
     let remote_archive = format!("{}/dist.tar.gz", remote_tmp);
-    let file_size = metadata(local_archive).map_err(|e| LicenseError::Invalid(e.to_string()))?.len();
+    let file_size = metadata(local_archive).map_err(|e| crate::AppError::Invalid(e.to_string()))?.len();
     let mut remote_file = sess.scp_send(std::path::Path::new(&remote_archive), 0o644, file_size, None).map_err(|e| {
         log_message(&format!("File upload initialization failed: {}", e));
-        LicenseError::Invalid(e.to_string())
+        crate::AppError::Invalid(e.to_string())
     })?;
     let mut local_file = File::open(local_archive).map_err(|e| {
         log_message(&format!("Local file open failed: {}", e));
-        LicenseError::Invalid(e.to_string())
+        crate::AppError::Invalid(e.to_string())
     })?;
     let bytes_copied = io::copy(&mut local_file, &mut remote_file).map_err(|e| {
         log_message(&format!("File upload failed: {}", e));
-        LicenseError::Invalid(e.to_string())
+        crate::AppError::Invalid(e.to_string())
     })?;
     if bytes_copied != file_size {
         log_message(&format!("File upload incomplete: copied {} bytes, expected {}", bytes_copied, file_size));
-        return Err(LicenseError::Invalid("File upload incomplete".to_string()));
+        return Err(crate::AppError::Invalid("File upload incomplete".to_string()));
     }
     log_message("File upload successful");
 
@@ -155,20 +155,20 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, remote_deploy_p
         log_message(&format!("Running verification command: {}", cmd));
         let mut channel = sess.channel_session().map_err(|e| {
             log_message(&format!("SSH channel creation failed: {}", e));
-            LicenseError::Invalid(e.to_string())
+            crate::AppError::Invalid(e.to_string())
         })?;
         channel.exec(&cmd).map_err(|e| {
             log_message(&format!("Verification command failed: {}", e));
-            LicenseError::Invalid(e.to_string())
+            crate::AppError::Invalid(e.to_string())
         })?;
         let mut output = String::new();
         channel.read_to_string(&mut output).map_err(|e| {
             log_message(&format!("Reading verification output failed: {}", e));
-            LicenseError::Invalid(e.to_string())
+            crate::AppError::Invalid(e.to_string())
         })?;
         channel.wait_close().map_err(|e| {
             log_message(&format!("Waiting for verification completion failed: {}", e));
-            LicenseError::Invalid(e.to_string())
+            crate::AppError::Invalid(e.to_string())
         })?;
         if !output.is_empty() {
             log_message(&format!("Verification output: {}", output.trim()));
@@ -180,27 +180,27 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, remote_deploy_p
     log_message(&format!("Final file existence check: {}", check_cmd));
     let mut channel = sess.channel_session().map_err(|e| {
         log_message(&format!("SSH channel creation failed: {}", e));
-        LicenseError::Invalid(e.to_string())
+        crate::AppError::Invalid(e.to_string())
     })?;
     channel.exec(&check_cmd).map_err(|e| {
         log_message(&format!("File check command failed: {}", e));
-        LicenseError::Invalid(e.to_string())
+        crate::AppError::Invalid(e.to_string())
     })?;
     let mut output = String::new();
     channel.read_to_string(&mut output).map_err(|e| {
         log_message(&format!("Reading file check output failed: {}", e));
-        LicenseError::Invalid(e.to_string())
+        crate::AppError::Invalid(e.to_string())
     })?;
     channel.wait_close().map_err(|e| {
         log_message(&format!("Waiting for file check completion failed: {}", e));
-        LicenseError::Invalid(e.to_string())
+        crate::AppError::Invalid(e.to_string())
     })?;
     if channel.exit_status().map_err(|e| {
         log_message(&format!("Getting file check exit status failed: {}", e));
-        LicenseError::Invalid(e.to_string())
+        crate::AppError::Invalid(e.to_string())
     })? != 0 || !output.trim().contains("OK") {
         log_message(&format!("Uploaded file verification failed. Output: {}", output.trim()));
-        return Err(LicenseError::Invalid("Uploaded file not found on server".to_string()));
+        return Err(crate::AppError::Invalid("Uploaded file not found on server".to_string()));
     }
     log_message("File verification successful");
 
@@ -224,30 +224,30 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, remote_deploy_p
         println!("[{}] Executing command: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), cmd);
         let mut channel = sess.channel_session().map_err(|e| {
             println!("[{}] SSH channel creation failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
-            LicenseError::Invalid(e.to_string())
+            crate::AppError::Invalid(e.to_string())
         })?;
         channel.exec(&cmd).map_err(|e| {
             println!("[{}] Command execution failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
-            LicenseError::Invalid(e.to_string())
+            crate::AppError::Invalid(e.to_string())
         })?;
         let mut output = String::new();
         channel.read_to_string(&mut output).map_err(|e| {
             println!("[{}] Reading command output failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
-            LicenseError::Invalid(e.to_string())
+            crate::AppError::Invalid(e.to_string())
         })?;
         channel.wait_close().map_err(|e| {
             println!("[{}] Waiting for command completion failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
-            LicenseError::Invalid(e.to_string())
+            crate::AppError::Invalid(e.to_string())
         })?;
         if channel.exit_status().map_err(|e| {
             println!("[{}] Getting exit status failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
-            LicenseError::Invalid(e.to_string())
+            crate::AppError::Invalid(e.to_string())
         })? != 0 {
             println!("[{}] Command execution failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), cmd);
             if !output.is_empty() {
                 println!("Command output: {}", output);
             }
-            return Err(LicenseError::Invalid(format!("Command failed: {}", cmd)));
+            return Err(crate::AppError::Invalid(format!("Command failed: {}", cmd)));
         } else {
             println!("[{}] Command executed successfully", Utc::now().format("%Y-%m-%d %H:%M:%S"));
             if !output.is_empty() {
@@ -260,19 +260,19 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, remote_deploy_p
     Ok(())
 }
 
-pub fn rollback_to_version(server: &ServerConfig, remote_deploy_path: &str, version: &str) -> Result<(), LicenseError> {
+pub fn rollback_to_version(server: &ServerConfig, remote_deploy_path: &str, version: &str) -> Result<(), crate::AppError> {
     log_message(&format!("Connecting to server {}:{}", server.host, server.port));
     let tcp = TcpStream::connect(format!("{}:{}", server.host, server.port)).map_err(|e| {
         log_message(&format!("Connection failed: {}", e));
-        LicenseError::Invalid(e.to_string())
+        crate::AppError::Invalid(e.to_string())
     })?;
     log_message("Connection successful");
-    let mut sess = Session::new().map_err(|e| LicenseError::Invalid(e.to_string()))?;
+    let mut sess = Session::new().map_err(|e| crate::AppError::Invalid(e.to_string()))?;
     sess.set_tcp_stream(tcp);
     log_message("Performing SSH handshake");
     sess.handshake().map_err(|e| {
         log_message(&format!("SSH handshake failed: {}", e));
-        LicenseError::Invalid(e.to_string())
+        crate::AppError::Invalid(e.to_string())
     })?;
     log_message("SSH handshake successful");
 
@@ -293,7 +293,7 @@ pub fn rollback_to_version(server: &ServerConfig, remote_deploy_path: &str, vers
 
     if !auth_success {
         log_message("All SSH authentication methods failed");
-        return Err(LicenseError::Invalid("SSH authentication failed".to_string()));
+        return Err(crate::AppError::Invalid("SSH authentication failed".to_string()));
     }
     log_message("SSH authentication successful");
 
@@ -308,30 +308,30 @@ pub fn rollback_to_version(server: &ServerConfig, remote_deploy_path: &str, vers
         println!("[{}] Executing command: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), cmd);
         let mut channel = sess.channel_session().map_err(|e| {
             println!("[{}] SSH channel creation failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
-            LicenseError::Invalid(e.to_string())
+            crate::AppError::Invalid(e.to_string())
         })?;
         channel.exec(&cmd).map_err(|e| {
             println!("[{}] Command execution failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
-            LicenseError::Invalid(e.to_string())
+            crate::AppError::Invalid(e.to_string())
         })?;
         let mut output = String::new();
         channel.read_to_string(&mut output).map_err(|e| {
             println!("[{}] Reading command output failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
-            LicenseError::Invalid(e.to_string())
+            crate::AppError::Invalid(e.to_string())
         })?;
         channel.wait_close().map_err(|e| {
             println!("[{}] Waiting for command completion failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
-            LicenseError::Invalid(e.to_string())
+            crate::AppError::Invalid(e.to_string())
         })?;
         if channel.exit_status().map_err(|e| {
             println!("[{}] Getting exit status failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
-            LicenseError::Invalid(e.to_string())
+            crate::AppError::Invalid(e.to_string())
         })? != 0 {
             println!("[{}] Command execution failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), cmd);
             if !output.is_empty() {
                 println!("Command output: {}", output);
             }
-            return Err(LicenseError::Invalid(format!("Command failed: {}", cmd)));
+            return Err(crate::AppError::Invalid(format!("Command failed: {}", cmd)));
         } else {
             println!("[{}] Command executed successfully", Utc::now().format("%Y-%m-%d %H:%M:%S"));
             if !output.is_empty() {
