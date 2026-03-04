@@ -61,7 +61,7 @@ pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), LicenseEr
     // 压缩dist目录
     let archive_path = "/tmp/dist.tar.gz";
     log_message(&format!("Compressing {} to {}", config.local_dist_path, archive_path));
-    compress_dist(&config.local_dist_path, archive_path)?;
+    compress_dist(&config.local_dist_path, &archive_path)?;
     log_message("Compression completed");
 
     // Free版本只支持单服务器
@@ -70,7 +70,7 @@ pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), LicenseEr
     }
 
     let server = &config.servers[0];
-    upload_and_deploy(server, archive_path, &server.remote_deploy_path, &config.remote_tmp, server.delete_old, &timestamp)?;
+    upload_and_deploy(server, &archive_path, &server.remote_deploy_path, &config.remote_tmp, server.delete_old, &timestamp)?;
 
     log_message("Deployment completed successfully");
     Ok(())
@@ -87,7 +87,8 @@ fn compress_dist(dist_path: &str, output_path: &str) -> Result<(), LicenseError>
     Ok(())
 }
 
-fn upload_and_deploy(server: &ServerConfig, local_archive: &str, deploy_path: &str, remote_tmp: &str, delete_old: bool, timestamp: &str) -> Result<(), LicenseError> {
+fn upload_and_deploy(server: &ServerConfig, local_archive: &str, remote_deploy_path: &str, remote_tmp: &str, delete_old: bool, timestamp: &str) -> Result<(), LicenseError> {
+    let deploy_path = format!("{}/releases", remote_deploy_path);
     log_message(&format!("Connecting to server {}:{}", server.host, server.port));
     let tcp = TcpStream::connect(format!("{}:{}", server.host, server.port)).map_err(|e| {
         log_message(&format!("Connection failed: {}", e));
@@ -207,17 +208,19 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, deploy_path: &s
     log_message("File verification successful");
 
     // 执行部署命令
-    let commands = vec![
+    let mut commands = vec![
         format!("mkdir -p {}", deploy_path),
-        format!("cd {} && [ -d dist ] && mv dist dist_backup_{} || true", deploy_path, timestamp),
-        format!("cd {} && tar -xzf {}", deploy_path, remote_archive),
-        if delete_old {
-            format!("cd {} && [ -d dist_backup_{} ] && rm -rf dist_backup_{} || true", deploy_path, timestamp, timestamp)
-        } else {
-            format!("cd {} && [ -d dist_backup_{} ] && mv dist_backup_{} old_dist_{} || true", deploy_path, timestamp, timestamp, timestamp)
-        },
-        format!("rm {}", remote_archive),
     ];
+    if delete_old {
+        commands.push(format!("cd {} && rm -rf ????????_??????", deploy_path));
+    }
+    commands.push(format!("cd {} && tar -xzf {}", deploy_path, remote_archive));
+    commands.push(format!("cd {} && mv dist {}", deploy_path, timestamp));
+    commands.push(format!("cd {} && ln -sfn releases/{} current", remote_deploy_path, timestamp));
+    if delete_old {
+        commands.push(format!("cd {} && for dir in releases/*; do if [ \"$dir\" != \"releases/{}\" ]; then rm -rf \"$dir\"; fi; done", remote_deploy_path, timestamp));
+    }
+    commands.push(format!("rm {}", remote_archive));
 
     println!("[{}] Starting deployment commands", Utc::now().format("%Y-%m-%d %H:%M:%S"));
     for cmd in commands {
