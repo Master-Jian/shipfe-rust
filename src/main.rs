@@ -212,7 +212,68 @@ fn run() -> Result<(), LicenseError> {
         Commands::Rollback { profile, to } => {
             let lic = LicenseCtx::from_file_or_free(&profile)?;
             lic.require(Capability::Rollback)?;
-            println!("rollback profile={profile}, to={to:?}");
+
+            let to_version = to.ok_or_else(|| LicenseError::Invalid("rollback requires --to parameter".to_string()))?;
+
+            let config_path = "shipfe.config.json".to_string();
+            let config_raw = std::fs::read_to_string(&config_path).map_err(|e| {
+                LicenseError::Invalid(format!("Failed to read config {}: {}", config_path, e))
+            })?;
+            let global_config: crate::config::GlobalConfig = serde_json::from_str(&config_raw)
+                .map_err(|e| LicenseError::Invalid(format!("config parse error: {e}")))?;
+
+            let (base_profile, sub) = if profile.contains('-') {
+                let mut it = profile.splitn(2, '-');
+                let p0 = it.next().unwrap_or("").to_string();
+                let p1 = it.next().map(|s| s.to_string());
+                (p0, p1)
+            } else {
+                (profile.clone(), None)
+            };
+
+            let env_config = global_config
+                .environments
+                .get(&base_profile)
+                .ok_or_else(|| {
+                    LicenseError::Invalid(format!(
+                        "Environment '{}' not found in config",
+                        base_profile
+                    ))
+                })?;
+
+            if let Some(sub_name) = &sub {
+                if let Some(sub_envs) = &env_config.sub_environments {
+                    let sub_config = sub_envs.get(sub_name).ok_or_else(|| {
+                        LicenseError::Invalid(format!(
+                            "Sub-environment '{}' not found in '{}'",
+                            sub_name, base_profile
+                        ))
+                    })?;
+
+                    let servers = env_config.servers.clone();
+                    if !servers.is_empty() {
+                        let server = &servers[0];
+                        deploy::rollback_to_version(server, &sub_config.remote_deploy_path, &to_version)?;
+                    }
+                } else {
+                    return Err(LicenseError::Invalid(format!(
+                        "No sub-environments defined for '{}'",
+                        base_profile
+                    )));
+                }
+            } else {
+                let servers = &env_config.servers;
+                if !servers.is_empty() {
+                    let server = &servers[0];
+                    deploy::rollback_to_version(server, &server.remote_deploy_path, &to_version)?;
+                }
+            }
+
+            println!("rollback profile={}{}, to={}",
+                base_profile,
+                sub.as_ref().map(|s| format!("-{}", s)).unwrap_or_default(),
+                to_version
+            );
             Ok(())
         }
     }

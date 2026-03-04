@@ -262,3 +262,87 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, remote_deploy_p
 
     Ok(())
 }
+
+pub fn rollback_to_version(server: &ServerConfig, remote_deploy_path: &str, version: &str) -> Result<(), LicenseError> {
+    log_message(&format!("Connecting to server {}:{}", server.host, server.port));
+    let tcp = TcpStream::connect(format!("{}:{}", server.host, server.port)).map_err(|e| {
+        log_message(&format!("Connection failed: {}", e));
+        LicenseError::Invalid(e.to_string())
+    })?;
+    log_message("Connection successful");
+    let mut sess = Session::new().map_err(|e| LicenseError::Invalid(e.to_string()))?;
+    sess.set_tcp_stream(tcp);
+    log_message("Performing SSH handshake");
+    sess.handshake().map_err(|e| {
+        log_message(&format!("SSH handshake failed: {}", e));
+        LicenseError::Invalid(e.to_string())
+    })?;
+    log_message("SSH handshake successful");
+
+    // 认证
+    log_message("Performing SSH authentication");
+    let auth_success = if let Some(password) = &server.password {
+        log_message("Attempting password authentication");
+        sess.userauth_password(&server.username, password).is_ok()
+    } else if let Ok(private_key) = std::env::var("SSH_PRIVATE_KEY") {
+        log_message("Attempting SSH private key authentication");
+        sess.userauth_pubkey_memory(&server.username, None, &private_key, None).is_ok()
+    } else if let Some(key_path) = &server.key_path {
+        log_message("Attempting SSH key file authentication");
+        sess.userauth_pubkey_file(&server.username, None, std::path::Path::new(key_path), None).is_ok()
+    } else {
+        false
+    };
+
+    if !auth_success {
+        log_message("All SSH authentication methods failed");
+        return Err(LicenseError::Invalid("SSH authentication failed".to_string()));
+    }
+    log_message("SSH authentication successful");
+
+    // 执行回滚命令
+    let commands = vec![
+        format!("cd {} && ls releases/ | grep -q ^{}$", remote_deploy_path, version),
+        format!("cd {} && ln -sfn releases/{} current", remote_deploy_path, version),
+    ];
+
+    println!("[{}] Starting rollback commands", Utc::now().format("%Y-%m-%d %H:%M:%S"));
+    for cmd in commands {
+        println!("[{}] Executing command: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), cmd);
+        let mut channel = sess.channel_session().map_err(|e| {
+            println!("[{}] SSH channel creation failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
+            LicenseError::Invalid(e.to_string())
+        })?;
+        channel.exec(&cmd).map_err(|e| {
+            println!("[{}] Command execution failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
+            LicenseError::Invalid(e.to_string())
+        })?;
+        let mut output = String::new();
+        channel.read_to_string(&mut output).map_err(|e| {
+            println!("[{}] Reading command output failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
+            LicenseError::Invalid(e.to_string())
+        })?;
+        channel.wait_close().map_err(|e| {
+            println!("[{}] Waiting for command completion failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
+            LicenseError::Invalid(e.to_string())
+        })?;
+        if channel.exit_status().map_err(|e| {
+            println!("[{}] Getting exit status failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
+            LicenseError::Invalid(e.to_string())
+        })? != 0 {
+            println!("[{}] Command execution failed: {}", Utc::now().format("%Y-%m-%d %H:%M:%S"), cmd);
+            if !output.is_empty() {
+                println!("Command output: {}", output);
+            }
+            return Err(LicenseError::Invalid(format!("Command failed: {}", cmd)));
+        } else {
+            println!("[{}] Command executed successfully", Utc::now().format("%Y-%m-%d %H:%M:%S"));
+            if !output.is_empty() {
+                println!("Command output: {}", output.trim());
+            }
+        }
+    }
+    println!("[{}] Rollback completed", Utc::now().format("%Y-%m-%d %H:%M:%S"));
+
+    Ok(())
+}
