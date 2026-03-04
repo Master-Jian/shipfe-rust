@@ -50,22 +50,52 @@ pub struct GlobalConfig {
 
 pub fn create_default_config() -> Result<(), crate::AppError> {
     let mut environments = HashMap::new();
-    environments.insert("default".to_string(), EnvironmentConfig {
+
+    // Development environment
+    environments.insert("dev".to_string(), EnvironmentConfig {
         build_command: Some("npm run build".to_string()),
         local_dist_path: "./dist".to_string(),
         servers: vec![ServerConfig {
-            host: "localhost".to_string(),
+            host: "dev.example.com".to_string(),
             port: 22,
-            username: "user".to_string(),
-            password: Some("password".to_string()),
-            key_path: None,
-            remote_deploy_path: "/var/www".to_string(),
+            username: "deploy".to_string(),
+            password: None,
+            key_path: Some("~/.ssh/id_rsa".to_string()),
+            remote_deploy_path: "/var/www/dev".to_string(),
+        }],
+        remote_tmp: "/tmp".to_string(),
+        sub_environments: Some({
+            let mut subs = HashMap::new();
+            subs.insert("admin".to_string(), SubEnvironmentConfig {
+                build_command: Some("npm run build:admin".to_string()),
+                local_dist_path: None,
+                remote_deploy_path: "/var/www/dev/admin".to_string(),
+            });
+            subs
+        }),
+        hashed_asset_patterns: Some(vec!["**/*.js".to_string(), "**/*.css".to_string()]),
+        enable_shared: Some(false),
+        keep_releases: Some(3),
+        delete_old: Some(false),
+    });
+
+    // Production environment
+    environments.insert("prod".to_string(), EnvironmentConfig {
+        build_command: Some("npm run build".to_string()),
+        local_dist_path: "./dist".to_string(),
+        servers: vec![ServerConfig {
+            host: "prod.example.com".to_string(),
+            port: 22,
+            username: "deploy".to_string(),
+            password: None,
+            key_path: Some("~/.ssh/prod_key".to_string()),
+            remote_deploy_path: "/var/www/prod".to_string(),
         }],
         remote_tmp: "/tmp".to_string(),
         sub_environments: None,
-        hashed_asset_patterns: Some(vec!["assets/".to_string()]),
-        enable_shared: Some(false),
-        keep_releases: Some(5),
+        hashed_asset_patterns: Some(vec!["**/*.js".to_string(), "**/*.css".to_string(), "**/*.{png,jpg,svg}".to_string()]),
+        enable_shared: Some(true),
+        keep_releases: Some(10),
         delete_old: Some(false),
     });
 

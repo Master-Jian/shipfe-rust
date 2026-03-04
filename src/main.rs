@@ -103,34 +103,39 @@ fn run() -> Result<(), AppError> {
                 })?;
 
             if all_sub && env_config.sub_environments.is_some() && sub.is_none() {
-                // 部署所有子环境
+                // 部署所有子环境（按字母顺序）
                 if let Some(sub_envs) = &env_config.sub_environments {
-                    for (sub_name, sub_config) in sub_envs {
-                        println!("Deploying sub-environment: {}-{}", base_profile, sub_name);
+                    let mut sub_names: Vec<&String> = sub_envs.keys().collect();
+                    sub_names.sort();
+                    
+                    for sub_name in sub_names {
+                        if let Some(sub_config) = sub_envs.get(sub_name) {
+                            println!("Deploying sub-environment: {}-{}", base_profile, sub_name);
 
-                        let mut servers = env_config.servers.clone();
-                        if !servers.is_empty() {
-                            servers[0].remote_deploy_path = sub_config.remote_deploy_path.clone();
+                            let mut servers = env_config.servers.clone();
+                            if !servers.is_empty() {
+                                servers[0].remote_deploy_path = sub_config.remote_deploy_path.clone();
+                            }
+
+                            let deploy_config = crate::config::DeployParams {
+                                build_command: sub_config
+                                    .build_command
+                                    .clone()
+                                    .or_else(|| env_config.build_command.clone()),
+                                local_dist_path: sub_config
+                                    .local_dist_path
+                                    .clone()
+                                    .unwrap_or_else(|| env_config.local_dist_path.clone()),
+                                servers,
+                                remote_tmp: env_config.remote_tmp.clone(),
+                                hashed_asset_patterns: env_config.hashed_asset_patterns.clone(),
+                                enable_shared: env_config.enable_shared.unwrap_or(false),
+                                keep_releases: env_config.keep_releases.unwrap_or(5),
+                                delete_old: env_config.delete_old.unwrap_or(false),
+                            };
+
+                            deploy_free(&deploy_config)?;
                         }
-
-                        let deploy_config = crate::config::DeployParams {
-                            build_command: sub_config
-                                .build_command
-                                .clone()
-                                .or_else(|| env_config.build_command.clone()),
-                            local_dist_path: sub_config
-                                .local_dist_path
-                                .clone()
-                                .unwrap_or_else(|| env_config.local_dist_path.clone()),
-                            servers,
-                            remote_tmp: env_config.remote_tmp.clone(),
-                            hashed_asset_patterns: env_config.hashed_asset_patterns.clone(),
-                            enable_shared: env_config.enable_shared.unwrap_or(false),
-                            keep_releases: env_config.keep_releases.unwrap_or(5),
-                            delete_old: env_config.delete_old.unwrap_or(false),
-                        };
-
-                        deploy_free(&deploy_config)?;
                     }
                 }
 
