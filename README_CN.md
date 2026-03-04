@@ -59,14 +59,13 @@ shipfe deploy --profile dev --all-sub
 shipfe deploy --atomic
 ```
 
-### 激活许可证（高级功能）
-```bash
-shipfe activate --profile prod --file license.key
-```
-
 ### 回滚部署
 ```bash
+# 回滚主环境
 shipfe rollback --profile prod --to 20260303_034945
+
+# 回滚子环境
+shipfe rollback --profile prod-admin --to 20260303_034945
 ```
 
 ## 配置

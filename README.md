@@ -59,14 +59,13 @@ shipfe deploy --profile dev --all-sub
 shipfe deploy --atomic
 ```
 
-### Activate License (for premium features)
-```bash
-shipfe activate --profile prod --file license.key
-```
-
 ### Rollback Deployment
 ```bash
+# Rollback main environment
 shipfe rollback --profile prod --to 20260303_034945
+
+# Rollback sub-environment
+shipfe rollback --profile prod-admin --to 20260303_034945
 ```
 
 ### Configuration
