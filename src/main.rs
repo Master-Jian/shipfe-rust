@@ -31,12 +31,6 @@ enum Commands {
         config: Option<String>,
 
         #[arg(long, default_value_t = false)]
-        atomic: bool,
-
-        #[arg(long, default_value_t = false)]
-        rollback_on_fail: bool,
-
-        #[arg(long, default_value_t = false)]
         all_sub: bool,
     },
 
@@ -68,8 +62,6 @@ fn run() -> Result<(), AppError> {
         Commands::Deploy {
             profile,
             config,
-            atomic,
-            rollback_on_fail,
             all_sub,
         } => {
             // All features are now free and open source
