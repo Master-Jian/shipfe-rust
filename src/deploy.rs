@@ -210,7 +210,6 @@ pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), crate::Ap
             &timestamp,
             config.enable_shared,
             config.keep_releases,
-            config.delete_old,
             &config.local_dist_path,
         )?;
     }
@@ -229,7 +228,6 @@ fn upload_and_deploy(
     timestamp: &str,
     enable_shared: bool,
     keep_releases: u32,
-    delete_old: bool,
     _local_dist_path: &str,
 ) -> Result<(), crate::AppError> {
     let deploy_path = format!("{}/releases", remote_deploy_path);
@@ -374,18 +372,11 @@ fn upload_and_deploy(
         ));
     }
 
-    if delete_old {
-        commands.push(format!(
-            "cd {} && for dir in releases/*; do if [ \"$dir\" != \"releases/{}\" ]; then rm -rf \"$dir\"; fi; done",
-            remote_deploy_path, timestamp
-        ));
-    } else {
-        commands.push(format!(
-            "cd {} && ls -t releases/ | tail -n +{} | xargs -r -I {{}} rm -rf releases/{{}}",
-            remote_deploy_path,
-            keep_releases + 1
-        ));
-    }
+    commands.push(format!(
+        "cd {} && ls -t releases/ | tail -n +{} | xargs -r -I {{}} rm -rf releases/{{}}",
+        remote_deploy_path,
+        keep_releases + 1
+    ));
 
     commands.push(format!("rm -f {}", remote_archive));
     if enable_shared && !hashed_assets.is_empty() {

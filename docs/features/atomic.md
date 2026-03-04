@@ -58,10 +58,12 @@ server {
 
 ## Usage
 
-```bash
-# Atomic deployment to default environment
-shipfe deploy --atomic
+Shipfe uses atomic deployment by default for all deployments.
 
-# Atomic deployment to specified environment
-shipfe deploy --profile prod --atomic
+```bash
+# Deploy to default environment (atomic by default)
+shipfe deploy
+
+# Deploy to specified environment (atomic by default)
+shipfe deploy --profile prod
 ```

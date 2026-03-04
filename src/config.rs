@@ -27,7 +27,6 @@ pub struct DeployParams {
     pub hashed_asset_patterns: Option<Vec<String>>,
     pub enable_shared: bool,
     pub keep_releases: u32,
-    pub delete_old: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -40,7 +39,6 @@ pub struct EnvironmentConfig {
     pub hashed_asset_patterns: Option<Vec<String>>,
     pub enable_shared: Option<bool>,
     pub keep_releases: Option<u32>,
-    pub delete_old: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -76,7 +74,6 @@ pub fn create_default_config() -> Result<(), crate::AppError> {
         hashed_asset_patterns: Some(vec!["**/*.js".to_string(), "**/*.css".to_string()]),
         enable_shared: Some(false),
         keep_releases: Some(3),
-        delete_old: Some(false),
     });
 
     // Production environment
@@ -96,7 +93,6 @@ pub fn create_default_config() -> Result<(), crate::AppError> {
         hashed_asset_patterns: Some(vec!["**/*.js".to_string(), "**/*.css".to_string(), "**/*.{png,jpg,svg}".to_string()]),
         enable_shared: Some(true),
         keep_releases: Some(10),
-        delete_old: Some(false),
     });
 
     let global_config = GlobalConfig { environments };
