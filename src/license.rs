@@ -189,7 +189,13 @@ impl LicenseCtx {
 
     pub fn require(&self, cap: Capability) -> Result<(), LicenseError> {
         match self {
-            LicenseCtx::Free => Err(LicenseError::MissingCapability(cap)),
+            LicenseCtx::Free => {
+                // Free plan supports basic features like Rollback
+                match cap {
+                    Capability::Rollback => Ok(()),
+                    _ => Err(LicenseError::MissingCapability(cap)),
+                }
+            }
             LicenseCtx::Pro { entitlements } => {
                 if entitlements.contains(&cap) {
                     Ok(())
