@@ -4,38 +4,38 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub](https://img.shields.io/badge/GitHub-Master--Jian/shipfe--rust-blue.svg)](https://github.com/Master-Jian/shipfe-rust)
 
-一个强大的、**免费**、**基于 Rust** 的 Web 应用部署工具，**不请求网络**，实现**一键前端静态部署包上传到服务器**。支持多环境和子环境部署，具有零停机原子部署功能。
+A powerful, **free**, **Rust-based** web application deployment tool that **does not request network**, enabling **one-click upload of frontend static deployment packages to servers**. Supports multi-environment and sub-environment deployment with zero-downtime atomic deployment functionality.
 
-## 安装
+## Documentation
+
+📖 [Full Documentation](https://master-jian.github.io/shipfe-rust/)
+
+## Installation
 
 ```bash
 npm install -g shipfe
 ```
 
-## 快速开始
+## Quick Start
 
-1. 初始化项目：
+1. Initialize the project:
 ```bash
 shipfe init
 ```
 
-2. 在 `shipfe.config.json` 中配置部署
+2. Configure deployment in `shipfe.config.json`
 
-3. 部署：
+3. Deploy:
 ```bash
 shipfe deploy --profile prod
 ```
 
-## 文档
+## Common Commands
 
-📖 [完整文档](https://master-jian.github.io/shipfe-rust/)
+- `shipfe deploy --profile <env>` - Deploy to specified environment
+- `shipfe deploy --atomic` - Atomic deployment
+- `shipfe rollback --profile <env> --to <timestamp>` - Rollback to specified version
 
-## 常用命令
-
-- `shipfe deploy --profile <env>` - 部署到指定环境
-- `shipfe deploy --atomic` - 原子部署
-- `shipfe rollback --profile <env> --to <timestamp>` - 回滚到指定版本
-
-## 许可证
+## License
 
 MIT
