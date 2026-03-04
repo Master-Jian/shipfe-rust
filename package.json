@@ -8,13 +8,9 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "npm run build",
-    "build-dev-admin": "npm run build",
-    "build-dev-bu": "npm run build",
-    "build-dev-shop": "npm run build",
-    "build-dev-customer": "npm run build",
-    "build-prod-admin": "npm run build",
-    "build-prod-api": "npm run build"
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "keywords": [
     "deployment",
@@ -25,7 +21,7 @@
   "author": "Jans",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Master-Jian/shipfe-rust.git"
+    "url": "git+https://github.com/Master-Jian/shipfe-rust.git"
   },
   "license": "MIT",
   "os": [
@@ -36,5 +32,16 @@
   "cpu": [
     "x64",
     "arm64"
-  ]
+  ],
+  "directories": {
+    "doc": "docs"
+  },
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/Master-Jian/shipfe-rust/issues"
+  },
+  "homepage": "https://github.com/Master-Jian/shipfe-rust#readme",
+  "devDependencies": {
+    "vitepress": "^1.6.4"
+  }
 }

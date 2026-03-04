@@ -3,3 +3,7 @@ shipfe.log
 shipfe.config.json
 profiles/*/deploy.default.json
 profiles/*/license.json
+
+node_modules
+docs/.vitepress/dist
+docs/.vitepress/cache
