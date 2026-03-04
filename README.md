@@ -1,11 +1,37 @@
 # Shipfe
 
-A powerful deployment tool for web applications with support for multiple environments and sub-environments.
+A powerful, **free**, **Rust-based** deployment tool for web applications that **never requests network** and enables **one-click static frontend deployment** to servers. Supports multiple environments and sub-environments with zero-downtime atomic deployments.
+
+## Key Features
+
+- 🚀 **Free and Open Source**: No hidden costs, MIT licensed
+- 🦀 **Built with Rust**: Fast, reliable, and memory-safe
+- 🔒 **No Network Requests**: Works completely offline, ensuring security and privacy
+- ⚡ **One-Click Deployment**: Upload static frontend packages to servers instantly
+- 🔄 **Atomic Deployments**: Zero-downtime deployments with automatic rollback
+- 🌍 **Multi-Environment Support**: Configure different environments (dev, staging, prod)
+- 📦 **Sub-Environment Support**: Deploy multiple apps to the same server
+- 🔑 **Flexible Authentication**: SSH key, password, or environment variable authentication
+- 📝 **Detailed Logging**: Comprehensive deployment logs for troubleshooting
 
 ## Installation
 
 ```bash
 npm install -g shipfe
+```
+
+## Quick Start
+
+1. Initialize your project:
+```bash
+shipfe init
+```
+
+2. Configure your deployment in `shipfe.config.json`
+
+3. Deploy:
+```bash
+shipfe deploy --profile prod
 ```
 
 ## Usage
@@ -31,6 +57,16 @@ shipfe deploy --profile dev --all-sub
 
 # Atomic deployment (creates releases/timestamp and updates current symlink)
 shipfe deploy --atomic
+```
+
+### Activate License (for premium features)
+```bash
+shipfe activate --profile prod --file license.key
+```
+
+### Rollback Deployment
+```bash
+shipfe rollback --profile prod --to 20260303_034945
 ```
 
 ### Configuration

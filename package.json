@@ -1,13 +1,20 @@
 {
   "name": "shipfe",
-  "version": "0.2.1",
+  "version": "1.0.0",
   "description": "A deployment tool for web applications",
   "main": "index.js",
   "bin": {
     "shipfe": "bin/shipfe"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "npm run build",
+    "build-dev-admin": "npm run build",
+    "build-dev-bu": "npm run build",
+    "build-dev-shop": "npm run build",
+    "build-dev-customer": "npm run build",
+    "build-prod-admin": "npm run build",
+    "build-prod-api": "npm run build"
   },
   "keywords": [
     "deployment",
@@ -15,12 +22,8 @@
     "ssh",
     "ci-cd"
   ],
-  "author": "Your Name",
+  "author": "Jans",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/yourusername/shipfe.git"
-  },
   "os": [
     "darwin",
     "linux",
