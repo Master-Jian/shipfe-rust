@@ -25,6 +25,7 @@ pub struct DeployParams {
     pub local_dist_path: String,
     pub servers: Vec<ServerConfig>,
     pub remote_tmp: String,
+    pub hashed_asset_patterns: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -34,6 +35,7 @@ pub struct EnvironmentConfig {
     pub servers: Vec<ServerConfig>,
     pub remote_tmp: String,
     pub sub_environments: Option<HashMap<String, SubEnvironmentConfig>>,
+    pub hashed_asset_patterns: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -57,6 +59,7 @@ pub fn create_default_config() -> Result<(), crate::AppError> {
         }],
         remote_tmp: "/tmp".to_string(),
         sub_environments: None,
+        hashed_asset_patterns: Some(vec!["assets/".to_string()]),
     });
 
     let global_config = GlobalConfig { environments };

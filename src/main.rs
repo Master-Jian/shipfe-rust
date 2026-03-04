@@ -124,6 +124,7 @@ fn run() -> Result<(), AppError> {
                                 .unwrap_or_else(|| env_config.local_dist_path.clone()),
                             servers,
                             remote_tmp: env_config.remote_tmp.clone(),
+                            hashed_asset_patterns: env_config.hashed_asset_patterns.clone(),
                         };
 
                         deploy_free(&deploy_config)?;
@@ -161,6 +162,7 @@ fn run() -> Result<(), AppError> {
                                 .unwrap_or_else(|| env_config.local_dist_path.clone()),
                             servers,
                             remote_tmp: env_config.remote_tmp.clone(),
+                            hashed_asset_patterns: env_config.hashed_asset_patterns.clone(),
                         }
                     } else {
                         return Err(AppError::Invalid(format!(
@@ -174,6 +176,7 @@ fn run() -> Result<(), AppError> {
                         local_dist_path: env_config.local_dist_path.clone(),
                         servers: env_config.servers.clone(),
                         remote_tmp: env_config.remote_tmp.clone(),
+                        hashed_asset_patterns: env_config.hashed_asset_patterns.clone(),
                     }
                 };
 

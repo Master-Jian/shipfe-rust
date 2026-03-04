@@ -6,10 +6,18 @@ use flate2::write::GzEncoder;
 use ssh2::Session;
 use std::net::TcpStream;
 use chrono::{DateTime, Utc};
+use std::path::Path;
 
 
 use crate::config::ServerConfig;
-use crate::AppError;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Snapshot {
+    id: String,
+    timestamp: String,
+    files: Vec<String>,
+    hashed_assets: Vec<String>,
+}
 
 fn log_message(message: &str) {
     let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S");
@@ -18,6 +26,63 @@ fn log_message(message: &str) {
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("shipfe.log") {
         let _ = file.write_all(log_entry.as_bytes());
     }
+}
+
+fn generate_snapshot(dist_path: &str, id: &str, patterns: &Option<Vec<String>>) -> Result<(), crate::AppError> {
+    let mut files = Vec::new();
+    let mut hashed_assets = Vec::new();
+    fn visit_dir(dir: &Path, base: &Path, files: &mut Vec<String>, hashed_assets: &mut Vec<String>, patterns: &Option<Vec<String>>) -> io::Result<()> {
+        if dir.is_dir() {
+            for entry in std::fs::read_dir(dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_dir() {
+                    visit_dir(&path, base, files, hashed_assets, patterns)?;
+                } else {
+                    let rel_path = path.strip_prefix(base).unwrap().to_string_lossy().to_string();
+                    files.push(rel_path.clone());
+                    // 检查是否匹配用户指定的 patterns
+                    if let Some(pats) = patterns {
+                        for pat in pats {
+                            if rel_path.starts_with(pat) {
+                                hashed_assets.push(rel_path.clone());
+                                break;
+                            }
+                        }
+                    } else {
+                        // 默认检测：文件名包含 - 后跟至少6位字母数字，然后是 .
+                        if rel_path.contains('-') && rel_path.contains('.') {
+                            let parts: Vec<&str> = rel_path.split('.').collect();
+                            if parts.len() >= 2 {
+                                let filename = parts[parts.len() - 2];
+                                if let Some(dash_pos) = filename.rfind('-') {
+                                    let after_dash = &filename[dash_pos + 1..];
+                                    if after_dash.len() >= 6 && after_dash.chars().all(|c| c.is_alphanumeric()) {
+                                        hashed_assets.push(rel_path);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    visit_dir(Path::new(dist_path), Path::new(dist_path), &mut files, &mut hashed_assets, patterns).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+
+    let snapshot = Snapshot {
+        id: id.to_string(),
+        timestamp: Utc::now().to_rfc3339(),
+        files,
+        hashed_assets,
+    };
+
+    let snapshot_path = format!("{}/shipfe.snapshot.json", dist_path);
+    let json = serde_json::to_string_pretty(&snapshot).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+    std::fs::write(&snapshot_path, json).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+    log_message(&format!("Generated snapshot at {}", snapshot_path));
+    Ok(())
 }
 
 fn run_build_command(cmd: &str) -> Result<(), crate::AppError> {
@@ -57,6 +122,9 @@ pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), crate::Ap
     let dist_metadata = metadata(&config.local_dist_path).map_err(|e| crate::AppError::Invalid(format!("Failed to get file metadata: {}", e)))?;
     let dist_mtime = dist_metadata.modified().map_err(|e| crate::AppError::Invalid(format!("Failed to get file mtime: {}", e)))?;
     let timestamp = DateTime::<Utc>::from(dist_mtime).format("%Y%m%d_%H%M%S").to_string();
+
+    // 生成 snapshot
+    generate_snapshot(&config.local_dist_path, &timestamp, &config.hashed_asset_patterns)?;
 
     // 压缩dist目录
     let archive_path = "/tmp/dist.tar.gz";
@@ -211,8 +279,8 @@ fn upload_and_deploy(server: &ServerConfig, local_archive: &str, remote_deploy_p
     if delete_old {
         commands.push(format!("cd {} && rm -rf ????????_??????", deploy_path));
     }
-    commands.push(format!("cd {} && tar -xzf {}", deploy_path, remote_archive));
-    commands.push(format!("cd {} && mv dist {}", deploy_path, timestamp));
+    commands.push(format!("cd {} && mkdir -p {}", deploy_path, timestamp));
+    commands.push(format!("cd {} && tar -xzf {} -C {}", deploy_path, remote_archive, timestamp));
     commands.push(format!("cd {} && ln -sfn releases/{} current", remote_deploy_path, timestamp));
     if delete_old {
         commands.push(format!("cd {} && for dir in releases/*; do if [ \"$dir\" != \"releases/{}\" ]; then rm -rf \"$dir\"; fi; done", remote_deploy_path, timestamp));
