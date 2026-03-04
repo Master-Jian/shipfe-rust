@@ -3,7 +3,7 @@ mod config;
 mod deploy;
 
 use clap::{Parser, Subcommand};
-use license::{Capability, LicenseCtx, LicenseError};
+use license::LicenseError;
 use config::create_default_config;
 use deploy::deploy_free;
 
@@ -17,14 +17,6 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Init {},
-
-    Activate {
-        #[arg(long, default_value = "default")]
-        profile: String,
-
-        #[arg(long)]
-        file: String,
-    },
 
     Deploy {
         #[arg(long, default_value = "default")]
@@ -68,14 +60,6 @@ fn run() -> Result<(), LicenseError> {
             Ok(())
         }
 
-        Commands::Activate { profile, file } => {
-            let raw = std::fs::read_to_string(&file)
-                .map_err(|e| LicenseError::Invalid(e.to_string()))?;
-            license::save_license_file(&profile, &raw)?;
-            println!("Activated license for profile={profile}");
-            Ok(())
-        }
-
         Commands::Deploy {
             profile,
             config,
@@ -83,15 +67,7 @@ fn run() -> Result<(), LicenseError> {
             rollback_on_fail,
             all_sub,
         } => {
-            let lic = LicenseCtx::from_file_or_free(&profile)?;
-
-            if atomic {
-                lic.require(Capability::AtomicSwitch)?;
-            }
-            if rollback_on_fail {
-                lic.require(Capability::Rollback)?;
-            }
-
+            // All features are now free and open source
             let config_path = config.unwrap_or_else(|| "shipfe.config.json".to_string());
 
             let config_raw = std::fs::read_to_string(&config_path).map_err(|e| {
@@ -210,9 +186,7 @@ fn run() -> Result<(), LicenseError> {
         }
 
         Commands::Rollback { profile, to } => {
-            let lic = LicenseCtx::from_file_or_free(&profile)?;
-            lic.require(Capability::Rollback)?;
-
+            // All features are now free and open source
             let to_version = to.ok_or_else(|| LicenseError::Invalid("rollback requires --to parameter".to_string()))?;
 
             let config_path = "shipfe.config.json".to_string();

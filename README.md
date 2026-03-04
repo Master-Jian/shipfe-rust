@@ -1,5 +1,9 @@
 # Shipfe
 
+[![npm version](https://img.shields.io/npm/v/shipfe.svg)](https://www.npmjs.com/package/shipfe)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub](https://img.shields.io/badge/GitHub-Master--Jian/shipfe--rust-blue.svg)](https://github.com/Master-Jian/shipfe-rust)
+
 A powerful, **free**, **Rust-based** deployment tool for web applications that **never requests network** and enables **one-click static frontend deployment** to servers. Supports multiple environments and sub-environments with zero-downtime atomic deployments.
 
 ## Key Features

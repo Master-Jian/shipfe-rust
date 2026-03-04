@@ -64,13 +64,10 @@ pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), LicenseEr
     compress_dist(&config.local_dist_path, &archive_path)?;
     log_message("Compression completed");
 
-    // Free版本只支持单服务器
-    if config.servers.len() != 1 {
-        return Err(LicenseError::Invalid("Free plan only supports single server".to_string()));
+    // Support multiple servers in open source version
+    for server in &config.servers {
+        upload_and_deploy(server, &archive_path, &server.remote_deploy_path, &config.remote_tmp, server.delete_old, &timestamp)?;
     }
-
-    let server = &config.servers[0];
-    upload_and_deploy(server, &archive_path, &server.remote_deploy_path, &config.remote_tmp, server.delete_old, &timestamp)?;
 
     log_message("Deployment completed successfully");
     Ok(())
