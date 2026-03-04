@@ -125,6 +125,8 @@ fn run() -> Result<(), AppError> {
                             servers,
                             remote_tmp: env_config.remote_tmp.clone(),
                             hashed_asset_patterns: env_config.hashed_asset_patterns.clone(),
+                            enable_shared: env_config.enable_shared.unwrap_or(false),
+                            keep_releases: env_config.keep_releases.unwrap_or(5),
                         };
 
                         deploy_free(&deploy_config)?;
@@ -163,6 +165,8 @@ fn run() -> Result<(), AppError> {
                             servers,
                             remote_tmp: env_config.remote_tmp.clone(),
                             hashed_asset_patterns: env_config.hashed_asset_patterns.clone(),
+                            enable_shared: env_config.enable_shared.unwrap_or(false),
+                            keep_releases: env_config.keep_releases.unwrap_or(5),
                         }
                     } else {
                         return Err(AppError::Invalid(format!(
@@ -177,6 +181,8 @@ fn run() -> Result<(), AppError> {
                         servers: env_config.servers.clone(),
                         remote_tmp: env_config.remote_tmp.clone(),
                         hashed_asset_patterns: env_config.hashed_asset_patterns.clone(),
+                        enable_shared: env_config.enable_shared.unwrap_or(false),
+                        keep_releases: env_config.keep_releases.unwrap_or(5),
                     }
                 };
 

@@ -9,7 +9,6 @@ pub struct ServerConfig {
     pub password: Option<String>,
     pub key_path: Option<String>,
     pub remote_deploy_path: String,
-    pub delete_old: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -26,6 +25,8 @@ pub struct DeployParams {
     pub servers: Vec<ServerConfig>,
     pub remote_tmp: String,
     pub hashed_asset_patterns: Option<Vec<String>>,
+    pub enable_shared: bool,
+    pub keep_releases: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -36,6 +37,8 @@ pub struct EnvironmentConfig {
     pub remote_tmp: String,
     pub sub_environments: Option<HashMap<String, SubEnvironmentConfig>>,
     pub hashed_asset_patterns: Option<Vec<String>>,
+    pub enable_shared: Option<bool>,
+    pub keep_releases: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -55,11 +58,12 @@ pub fn create_default_config() -> Result<(), crate::AppError> {
             password: Some("password".to_string()),
             key_path: None,
             remote_deploy_path: "/var/www".to_string(),
-            delete_old: false,
         }],
         remote_tmp: "/tmp".to_string(),
         sub_environments: None,
         hashed_asset_patterns: Some(vec!["assets/".to_string()]),
+        enable_shared: Some(false),
+        keep_releases: Some(5),
     });
 
     let global_config = GlobalConfig { environments };
