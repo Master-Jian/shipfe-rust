@@ -91,6 +91,10 @@ shipfe deploy --config production.json
 - `pre_deploy_commands` - 部署前命令
 - `post_deploy_commands` - 部署后命令
 
+## Web 服务器配置
+
+要提供部署的应用服务，请将 Web 服务器配置为指向部署目录。详见 [Nginx 配置](nginx.md) 设置说明。
+
 ## 环境特定配置
 
 对于不同的部署环境，可以创建多个配置文件：

@@ -299,7 +299,6 @@ fn upload_and_deploy(
     // 部署命令
     let mut commands = vec![format!("mkdir -p {}", deploy_path)];
     if enable_shared {
-        commands.push(format!("cd {}/shared && find . -mindepth 1 -delete 2>/dev/null || true", remote_deploy_path));
         commands.push(format!("mkdir -p {}/shared/assets", remote_deploy_path));
     }
 
@@ -315,6 +314,34 @@ fn upload_and_deploy(
             "cd {}/releases/{}/assets && tar -xzf {} --overwrite",
             remote_deploy_path, timestamp, remote_shared_archive
         ));
+        
+        // Move shared assets to shared/assets directory and create hard links
+        // ✅ 把 assets 里的文件移动到 shared/assets，并在 assets/ 内创建硬链接（路径正确，不删 assets）
+        commands.push(format!(
+            "set -e; \
+             rel=\"{d}/releases/{t}\"; \
+             shared=\"{d}/shared/assets\"; \
+             mkdir -p \"$shared\"; \
+             if [ -d \"$rel/assets\" ]; then \
+               cd \"$rel/assets\"; \
+               for f in *; do \
+                 [ -f \"$f\" ] || continue; \
+                 sf=\"$shared/$f\"; \
+                 if [ ! -f \"$sf\" ]; then \
+                   mv -f \"$f\" \"$sf\"; \
+                 else \
+                   rm -f \"$f\"; \
+                 fi; \
+                 ln -f \"$sf\" \"$f\"; \
+               done; \
+             fi; \
+             true",
+            d = remote_deploy_path,
+            t = timestamp
+        ));
+        
+        // Remove the temporary assets directory
+        commands.push(format!("rm -rf {}/releases/{}/assets", remote_deploy_path, timestamp));
     }
 
     commands.push(format!(

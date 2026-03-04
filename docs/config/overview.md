@@ -42,6 +42,10 @@ Each environment contains:
 - `remote_tmp`: Remote temporary directory
 - `servers`: List of servers
 
+## Web Server Configuration
+
+For serving deployed applications, configure your web server to point to the deployment directory. See [Nginx Configuration](nginx.md) for detailed setup instructions.
+
 ## Minimal Configuration Example
 
 ```json
