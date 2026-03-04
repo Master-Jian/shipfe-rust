@@ -49,6 +49,6 @@
     "vitepress": "^1.6.4"
   },
   "dependencies": {
-    "shipfe": "file:shipfe-1.1.5.tgz"
+    "shipfe": "file:shipfe-1.1.6.tgz"
   }
 }
