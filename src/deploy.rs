@@ -5,32 +5,10 @@ use flate2::Compression;
 use flate2::write::GzEncoder;
 use ssh2::Session;
 use std::net::TcpStream;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use std::path::Path;
 
 use crate::config::ServerConfig;
-
-fn compress_shared_assets(dist_path: &str, hashed_assets: &[String], output_path: &str) -> Result<(), crate::AppError> {
-    let file = File::create(output_path).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
-    let enc = GzEncoder::new(file, Compression::default());
-    let mut tar = Builder::new(enc);
-
-    for asset in hashed_assets {
-        let asset_path = Path::new(dist_path).join(asset);
-        if asset_path.exists() {
-            let asset_name = Path::new(asset)
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_string();
-            tar.append_path_with_name(&asset_path, &asset_name)
-                .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
-        }
-    }
-
-    tar.finish().map_err(|e| crate::AppError::Invalid(e.to_string()))?;
-    Ok(())
-}
 
 fn compress_dist(dist_path: &str, output_path: &str) -> Result<(), crate::AppError> {
     let file = File::create(output_path).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
@@ -167,12 +145,8 @@ pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), crate::Ap
         run_build_command(build_cmd)?;
     }
 
-    let dist_metadata = metadata(&config.local_dist_path)
-        .map_err(|e| crate::AppError::Invalid(format!("Failed to get file metadata: {}", e)))?;
-    let dist_mtime = dist_metadata
-        .modified()
-        .map_err(|e| crate::AppError::Invalid(format!("Failed to get file mtime: {}", e)))?;
-    let timestamp = DateTime::<Utc>::from(dist_mtime).format("%Y%m%d_%H%M%S").to_string();
+    // 使用当前时间作为部署版本号，避免依赖 dist 目录 mtime 导致时间戳滞后
+    let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
 
     generate_snapshot(&config.local_dist_path, &timestamp, &config.hashed_asset_patterns)?;
 
@@ -192,18 +166,10 @@ pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), crate::Ap
     compress_dist(&config.local_dist_path, &archive_path)?;
     log_message("Compression completed");
 
-    let shared_archive_path = "/tmp/shared_assets.tar.gz";
-    if config.enable_shared && !hashed_assets.is_empty() {
-        log_message(&format!("Compressing shared assets to {}", shared_archive_path));
-        compress_shared_assets(&config.local_dist_path, &hashed_assets, &shared_archive_path)?;
-        log_message("Shared assets compression completed");
-    }
-
     for server in &config.servers {
         upload_and_deploy(
             server,
             &archive_path,
-            &shared_archive_path,
             &hashed_assets,
             &server.remote_deploy_path,
             &config.remote_tmp,
@@ -221,7 +187,6 @@ pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), crate::Ap
 fn upload_and_deploy(
     server: &ServerConfig,
     local_archive: &str,
-    local_shared_archive: &str,
     hashed_assets: &[String],
     remote_deploy_path: &str,
     remote_tmp: &str,
@@ -263,26 +228,13 @@ fn upload_and_deploy(
     let mut local_file = File::open(local_archive).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
     io::copy(&mut local_file, &mut remote_file).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
 
-    // 上传 shared_assets + current_hashes.txt
-    let remote_shared_archive = format!("{}/shared_assets.tar.gz", remote_tmp);
+    // 仅上传 current_hashes.txt（保存本次发布涉及的 hash 资源相对路径）
     let remote_hashes = format!("{}/current_hashes.txt", remote_tmp);
 
     if enable_shared && !hashed_assets.is_empty() {
-        // shared_assets.tar.gz
-        let shared_file_size = metadata(local_shared_archive).map_err(|e| crate::AppError::Invalid(e.to_string()))?.len();
-        let mut remote_shared_file = sess
-            .scp_send(Path::new(&remote_shared_archive), 0o644, shared_file_size, None)
-            .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
-        let mut local_shared_file = File::open(local_shared_archive).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
-        io::copy(&mut local_shared_file, &mut remote_shared_file).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
-
-        // ✅ current_hashes.txt：写 basename（只文件名）
+        // ✅ current_hashes.txt：写入相对路径，便于在远端按路径精确处理
         let local_hashes_path = "/tmp/current_hashes.txt";
-        let hash_lines = hashed_assets
-            .iter()
-            .filter_map(|p| Path::new(p).file_name().map(|s| s.to_string_lossy().to_string()))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let hash_lines = hashed_assets.join("\n");
 
         std::fs::write(local_hashes_path, hash_lines).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
 
@@ -297,7 +249,8 @@ fn upload_and_deploy(
     // 部署命令
     let mut commands = vec![format!("mkdir -p {}", deploy_path)];
     if enable_shared {
-        commands.push(format!("mkdir -p {}/shared/assets", remote_deploy_path));
+        // 共享文件根目录：shared，下面保持与 dist 相同的相对路径结构
+        commands.push(format!("mkdir -p {}/shared", remote_deploy_path));
     }
 
     commands.push(format!("cd {} && mkdir -p {}", deploy_path, timestamp));
@@ -306,71 +259,42 @@ fn upload_and_deploy(
         deploy_path, remote_archive, timestamp
     ));
 
-    if enable_shared && !hashed_assets.is_empty() {
-        commands.push(format!("mkdir -p {}/releases/{}/assets", remote_deploy_path, timestamp));
-        commands.push(format!(
-            "cd {}/releases/{}/assets && tar -xzf {} --overwrite",
-            remote_deploy_path, timestamp, remote_shared_archive
-        ));
-        
-        // Move shared assets to shared/assets directory and create hard links
-        // ✅ 把 assets 里的文件移动到 shared/assets，并在 assets/ 内创建硬链接（路径正确，不删 assets）
-        commands.push(format!(
-            "set -e; \
-             rel=\"{d}/releases/{t}\"; \
-             shared=\"{d}/shared/assets\"; \
-             mkdir -p \"$shared\"; \
-             if [ -d \"$rel/assets\" ]; then \
-               cd \"$rel/assets\"; \
-               for f in *; do \
-                 [ -f \"$f\" ] || continue; \
-                 sf=\"$shared/$f\"; \
-                 if [ ! -f \"$sf\" ]; then \
-                   mv -f \"$f\" \"$sf\"; \
-                 else \
-                   rm -f \"$f\"; \
-                 fi; \
-                 ln -f \"$sf\" \"$f\"; \
-               done; \
-             fi; \
-             true",
-            d = remote_deploy_path,
-            t = timestamp
-        ));
-        
-        // Remove the temporary assets directory
-        commands.push(format!("rm -rf {}/releases/{}/assets", remote_deploy_path, timestamp));
-    }
+        if enable_shared && !hashed_assets.is_empty() {
+                // ✅ 使用 snapshot 中记录的相对路径，将本次发布的 hash 资源移动到 shared 下
+                // 然后在原位置创建硬链接。这样：
+                //  - releases/<timestamp> 目录结构与本地 dist 完全一致；
+                //  - shared 仅作为真正的数据存储位置；
+                //  - 如果文件名重复，新的版本会覆盖旧的（mv -f）。
+                commands.push(format!(
+                        "set -e; \
+                         rel_root=\"{d}/releases/{t}\"; \
+                         shared_root=\"{d}/shared\"; \
+                         hashes=\"{h}\"; \
+                         mkdir -p \"$shared_root\"; \
+                         if [ -f \"$hashes\" ]; then \
+                             cd \"$rel_root\"; \
+                             while IFS= read -r p; do \
+                                 [ -z \"$p\" ] && continue; \
+                                 src=\"$rel_root/$p\"; \
+                                 if [ -f \"$src\" ]; then \
+                                     dst=\"$shared_root/$p\"; \
+                                     mkdir -p \"$(dirname \"$dst\")\"; \
+                                     mv -f \"$src\" \"$dst\"; \
+                                     ln -f \"$dst\" \"$src\"; \
+                                 fi; \
+                             done < \"$hashes\"; \
+                         fi; \
+                         true",
+                        d = remote_deploy_path,
+                        t = timestamp,
+                        h = remote_hashes
+                ));
+        }
 
     commands.push(format!(
         "cd {} && ln -sfn releases/{} current",
         remote_deploy_path, timestamp
     ));
-
-    // ✅ 临时调试命令
-    if enable_shared && !hashed_assets.is_empty() {
-        commands.push(format!("cd {} && whoami && id", remote_deploy_path));
-        commands.push(format!("cd {} && ls -la shared/assets | head -n 20 || true", remote_deploy_path));
-        commands.push(format!("ls -la {} && head -n 20 {} || true", remote_hashes, remote_hashes));
-    }
-
-    // ✅ 修复点：清理 shared/assets 时避免空输入导致 rm 失败；并使用固定整行匹配
-    if enable_shared && !hashed_assets.is_empty() {
-        commands.push(format!(
-            "cd {d} && \
-             if [ -d shared/assets ]; then \
-               if [ -f {h} ]; then \
-                 ls -1 shared/assets/ 2>/dev/null | grep -v -F -x -f {h} 2>/dev/null | \
-                 while IFS= read -r f; do \
-                   rm -f \"shared/assets/$f\" 2>/dev/null || true; \
-                 done; \
-               fi; \
-             fi; \
-             true",
-            d = remote_deploy_path,
-            h = remote_hashes
-        ));
-    }
 
     commands.push(format!(
         "cd {} && ls -t releases/ | tail -n +{} | xargs -r -I {{}} rm -rf releases/{{}}",
@@ -380,7 +304,6 @@ fn upload_and_deploy(
 
     commands.push(format!("rm -f {}", remote_archive));
     if enable_shared && !hashed_assets.is_empty() {
-        commands.push(format!("rm -f {}", remote_shared_archive));
         commands.push(format!("rm -f {}", remote_hashes));
     }
 

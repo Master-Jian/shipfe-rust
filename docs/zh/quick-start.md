@@ -4,10 +4,13 @@
 
 ## 安装
 
-### 使用npm安装
+### 使用npm安装（项目级推荐）
+
+在你的前端项目根目录安装为开发依赖，并通过 `npx` 使用：
 
 ```bash
-npm install -g shipfe
+npm install --save-dev shipfe
+npx shipfe --version
 ```
 
 ### 从源码构建
@@ -24,7 +27,7 @@ cp target/release/shipfe /usr/local/bin/shipfe
 在您的项目根目录下运行：
 
 ```bash
-shipfe init
+npx shipfe init
 ```
 
 这将创建 `shipfe.config.json` 配置文件。
@@ -70,7 +73,7 @@ ssh-copy-id user@your-server.com
 运行构建和部署：
 
 ```bash
-shipfe deploy
+npx shipfe deploy
 ```
 
 Shipfe将：
@@ -97,7 +100,7 @@ ssh user@server "ls -la /var/www/myapp/current"
 如果部署出现问题，可以快速回滚：
 
 ```bash
-shipfe rollback
+npx shipfe rollback
 ```
 
 这将自动切换到上一个稳定版本。

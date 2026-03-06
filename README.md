@@ -12,22 +12,25 @@ A powerful, **free**, **Rust-based** web application deployment tool that **does
 
 ## Installation
 
+Install locally in your project (recommended):
+
 ```bash
-npm install -g shipfe
+npm install --save-dev shipfe
+npx shipfe --version
 ```
 
 ## Quick Start
 
 1. Initialize the project:
 ```bash
-shipfe init
+npx shipfe init
 ```
 
 2. Configure deployment in `shipfe.config.json`
 
 3. Deploy:
 ```bash
-shipfe deploy --profile prod
+npx shipfe deploy --profile prod
 ```
 
 ## Common Commands

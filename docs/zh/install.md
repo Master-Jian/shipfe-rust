@@ -11,27 +11,46 @@ Shipfe 支持多种安装方式，选择最适合您的方式。
 
 ## 方式一：npm安装（推荐）
 
-### 全局安装
+### 项目级安装（推荐）
 
-```bash
-npm install -g shipfe
-```
-
-### 项目级安装
+在你的前端项目根目录中安装为开发依赖：
 
 ```bash
 npm install --save-dev shipfe
 ```
 
-然后在 `package.json` 中添加脚本：
+推荐直接使用 `npx` 调用：
+
+```bash
+npx shipfe --version
+npx shipfe --help
+```
+
+或者在 `package.json` 中添加脚本：
 
 ```json
 {
   "scripts": {
-    "deploy": "shipfe deploy",
-    "rollback": "shipfe rollback"
+    "shipfe:init": "shipfe init",
+    "shipfe:deploy": "shipfe deploy",
+    "shipfe:rollback": "shipfe rollback"
   }
 }
+```
+
+然后通过 npm 脚本使用：
+
+```bash
+npm run shipfe:init
+npm run shipfe:deploy -- --profile prod
+```
+
+### 全局安装（可选）
+
+如果你更习惯全局 CLI，也可以选择全局安装（切换 Node 版本或环境时需要注意）：
+
+```bash
+npm install -g shipfe
 ```
 
 ## 方式二：从源码构建
@@ -126,7 +145,7 @@ shipfe --help
 
 ### 权限问题
 
-如果遇到权限错误：
+使用项目级安装时通常不会遇到权限问题。如果你确实需要全局安装并遇到权限错误，可以：
 
 ```bash
 # 使用sudo安装（不推荐）
@@ -139,11 +158,11 @@ export PATH=~/.npm-global/bin:$PATH
 
 ### 网络问题
 
-如果npm安装失败，尝试使用国内镜像：
+如果npm安装失败，尝试使用国内镜像（同样推荐项目级安装）：
 
 ```bash
 npm config set registry https://registry.npmmirror.com
-npm install -g shipfe
+npm install --save-dev shipfe
 ```
 
 ### Rust编译问题

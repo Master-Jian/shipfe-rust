@@ -4,9 +4,11 @@ This page aims to complete a full deployment cycle (init → config → deploy �
 
 ## 1. Installation
 
+Install locally in your project and verify with `npx`:
+
 ```bash
-npm install -g shipfe
-shipfe --version
+npm install --save-dev shipfe
+npx shipfe --version
 ```
 
 ## 2. Initialize Configuration
@@ -14,7 +16,7 @@ shipfe --version
 Run in your project root directory:
 
 ```bash
-shipfe init
+npx shipfe init
 ```
 
 This will generate (example):
@@ -51,7 +53,7 @@ Edit `shipfe.config.json`:
 ## 4. First Deployment (Atomic Deployment Recommended)
 
 ```bash
-shipfe deploy --profile prod --atomic
+npx shipfe deploy --profile prod --atomic
 ```
 
 After deployment, the server directory will typically be:
@@ -85,7 +87,7 @@ Or directly access your domain/server address.
 Rollback to a specific timestamp version (example):
 
 ```bash
-shipfe rollback --profile prod --to 20260303_034945
+npx shipfe rollback --profile prod --to 20260303_034945
 ```
 
 Timestamps come from the `releases/` directory names.

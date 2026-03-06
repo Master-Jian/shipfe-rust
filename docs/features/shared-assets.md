@@ -1,6 +1,6 @@
 # Shared Assets
 
-Shared assets reduce disk usage and network transmission through file hash deduplication.
+Shared assets allow you to separate **where files are served from** (release directory) from **where they are physically stored** (`shared/`), so that frequently reused assets don't need to be re-uploaded every time.
 
 ## Enable Shared Assets
 
@@ -18,19 +18,48 @@ Shared assets reduce disk usage and network transmission through file hash dedup
 }
 ```
 
+- `enable_shared`: turns shared asset management on for the environment.
+- `hashed_asset_patterns`: glob patterns for files that should be treated as shared assets (typically files with content hashes in their names, such as `app-abc123.js`).
+
 ## How It Works
 
-1. **File Matching**: Matches files according to `hashed_asset_patterns`
-2. **Hash Calculation**: Calculates SHA256 hash for matching files
-3. **Storage Strategy**:
-   - Same hash files are stored only once in `shared/assets/` directory
-   - Filename format: `{hash}.{ext}`, e.g., `abc123def456.js`
-4. **Link Creation**: Creates hard links in release directory pointing to shared files
-5. **Cleanup Mechanism**: Deletes shared files no longer referenced by any release
+1. **File Matching**
+   - After build, Shipfe scans `local_dist_path` and matches files by `hashed_asset_patterns`.
+   - All matched files are recorded as `hashed_assets` in `shipfe.snapshot.json` using their **relative paths**, e.g. `assets/app-abc123.js`, `assets/images/logo-xyz999.png`.
 
-## Shared Assets Reset
+2. **Normal Release Extraction**
+   - The full `dist` directory is always uploaded and extracted into:
 
-At the start of each deployment, Shipfe automatically clears all existing resources in the `shared/` directory and recreates the `shared/assets/` directory. This ensures each deployment starts from a clean state, avoiding accumulation of old resources and potential conflicts.
+     ```
+     remote_deploy_path/
+       releases/<timestamp>/...   # exactly the same structure as local dist
+     ```
+
+   - The web server serves from `remote_deploy_path/current`, so the URL structure matches `dist`.
+
+3. **Shared Storage Strategy**
+   - For each path `p` in `hashed_assets`:
+     - Source: `releases/<timestamp>/{p}`
+     - Target: `shared/{p}`
+   - Shipfe moves the file and creates a hard link back:
+
+     ```bash
+     mv -f releases/<timestamp>/{p} shared/{p}
+     ln -f shared/{p} releases/<timestamp>/{p}
+     ```
+
+   - This means:
+     - **Release directory structure is unchanged** (paths in `current/` are identical to `dist`).
+     - Shared directory mirrors the same relative paths under `shared/`.
+     - If a file with the same path already exists in `shared/`, it is overwritten (`mv -f`).
+
+4. **Link Creation**
+   - Requests still hit `current/...` as usual.
+   - The filesystem ensures those files physically live under `shared/...` via hard links.
+
+5. **Cleanup**
+   - Current implementation does **not** automatically delete old files under `shared/`.
+   - If you want to drop history and reclaim disk space, you can manually clean `shared/` when no deployments are running.
 
 ## Directory Structure Example
 
@@ -38,35 +67,43 @@ At the start of each deployment, Shipfe automatically clears all existing resour
 remote_deploy_path/
 ├── shared/
 │   └── assets/
-│       ├── abc123def456.js
-│       ├── def789ghi012.css
-│       └── hij345klm678.png
+│       ├── app-abc123.js
+│       └── images/
+│           └── logo-xyz999.png
 ├── releases/
-│   ├── 20260304_120000/
-│   │   ├── index.html
-│   │   ├── app.js -> ../../shared/assets/abc123def456.js
-│   │   └── styles.css -> ../../shared/assets/def789ghi012.css
 │   └── 20260304_120100/
 │       ├── index.html
-│       ├── app.js -> ../../shared/assets/abc123def456.js
-│       └── styles.css -> ../../shared/assets/def789ghi012.css
+│       ├── assets/
+│       │   ├── app-abc123.js -> ../../../shared/assets/app-abc123.js
+│       │   └── images/
+│       │       └── logo-xyz999.png -> ../../../../shared/assets/images/logo-xyz999.png
+│       └── ...
 └── current -> releases/20260304_120100
 ```
 
-## Benefits
+## Example Patterns
 
-- **Reduced Disk Usage**: Same files stored only once
-- **Faster Deployments**: Unchanged files don't need re-uploading
-- **Bandwidth Savings**: Only new or changed files are transmitted
-- **Atomic Updates**: All hard links created simultaneously for consistency
+- Minimal: only JS/CSS bundles
+
+  ```json
+  "hashed_asset_patterns": [
+    "assets/**/*.js",
+    "assets/**/*.css"
+  ]
+  ```
+
+- Full assets directory (including images, fonts, etc.)
+
+  ```json
+  "hashed_asset_patterns": [
+    "assets/**"
+  ]
+  ```
+
+In all cases, file paths under `shared/` follow the same relative layout as under `dist`.
 
 ## Notes
 
-- Shared assets require hard link support on the server filesystem
-- First enablement hashes all matching files
-- Disabling shared doesn't delete existing shared files; manual cleanup required
-
-## Use Cases
-
-- **Enable Shared**: Large apps with frequent deployments and many static resources
-- **Disable Shared**: Small apps with infrequent deployments or need for simple debugging
+- Requires filesystem support for hard links on the server.
+- `hashed_asset_patterns` only controls **which files** participate in the shared mechanism; other files remain as normal files in each release.
+- Shared assets are an optimization; if you prefer simpler behavior, set `enable_shared` to `false` for the environment.
