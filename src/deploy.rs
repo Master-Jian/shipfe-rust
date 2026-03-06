@@ -140,6 +140,18 @@ fn run_build_command(cmd: &str) -> Result<(), crate::AppError> {
     }
 }
 
+fn write_hashed_assets_manifest(dist_path: &str, hashed_assets: &[String]) -> Result<(), crate::AppError> {
+    let manifest_path = format!("{}/shipfe.hashed_assets.txt", dist_path);
+    let content = if hashed_assets.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", hashed_assets.join("\n"))
+    };
+
+    std::fs::write(&manifest_path, content).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+    Ok(())
+}
+
 pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), crate::AppError> {
     if let Some(build_cmd) = &config.build_command {
         run_build_command(build_cmd)?;
@@ -160,6 +172,8 @@ pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), crate::Ap
     } else {
         Vec::new()
     };
+
+    write_hashed_assets_manifest(&config.local_dist_path, &hashed_assets)?;
 
     let archive_path = "/tmp/dist.tar.gz";
     log_message(&format!("Compressing {} to {}", config.local_dist_path, archive_path));
@@ -301,6 +315,44 @@ fn upload_and_deploy(
         remote_deploy_path,
         keep_releases + 1
     ));
+
+    if enable_shared {
+        commands.push(format!(
+            "set -e; \
+             deploy_root=\"{d}\"; \
+             shared_root=\"$deploy_root/shared\"; \
+             refs_file=\"{tmp}/shipfe_shared_refs_{t}.txt\"; \
+             rm -f \"$refs_file\"; \
+             touch \"$refs_file\"; \
+             if [ -d \"$deploy_root/releases\" ]; then \
+                 for rel in \"$deploy_root\"/releases/*; do \
+                     [ -d \"$rel\" ] || continue; \
+                     manifest=\"$rel/shipfe.hashed_assets.txt\"; \
+                     snapshot=\"$rel/shipfe.snapshot.json\"; \
+                     if [ -f \"$manifest\" ]; then \
+                         cat \"$manifest\" >> \"$refs_file\"; \
+                     elif [ -f \"$snapshot\" ]; then \
+                         awk '/\"hashed_assets\"[[:space:]]*:/ {{ in_list=1; next }} in_list && /]/ {{ in_list=0; next }} in_list {{ gsub(/^[[:space:]]*\"/, \"\"); gsub(/\",?[[:space:]]*$/, \"\"); if (length($0)) print }}' \"$snapshot\" >> \"$refs_file\"; \
+                     fi; \
+                 done; \
+             fi; \
+             sort -u \"$refs_file\" -o \"$refs_file\"; \
+             if [ -d \"$shared_root\" ]; then \
+                 find \"$shared_root\" -type f | while IFS= read -r file; do \
+                     rel=\"${{file#\"$shared_root\"/}}\"; \
+                     if ! grep -Fqx -- \"$rel\" \"$refs_file\"; then \
+                         rm -f \"$file\"; \
+                     fi; \
+                 done; \
+                 find \"$shared_root\" -depth -type d -empty -delete; \
+             fi; \
+             rm -f \"$refs_file\"; \
+             true",
+            d = remote_deploy_path,
+            tmp = remote_tmp,
+            t = timestamp,
+        ));
+    }
 
     commands.push(format!("rm -f {}", remote_archive));
     if enable_shared && !hashed_assets.is_empty() {
