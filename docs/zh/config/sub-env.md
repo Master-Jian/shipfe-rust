@@ -2,6 +2,39 @@
 
 为不同的部署环境配置Shipfe。
 
+## 子环境部署顺序
+
+当使用 `shipfe deploy --profile <env> --all-sub` 时，Shipfe 会严格按照 `shipfe.config.json` 中 `sub_environments` 的声明顺序依次部署。
+
+例如下面的配置会先部署 `admin`，再部署 `shop`，不会按字母顺序重新排序：
+
+```json
+{
+  "environments": {
+    "dev": {
+      "sub_environments": {
+        "admin": {
+          "build_command": "npm run build:admin",
+          "remote_deploy_path": "/var/www/dev/admin"
+        },
+        "shop": {
+          "build_command": "npm run build:shop",
+          "remote_deploy_path": "/var/www/dev/shop"
+        }
+      }
+    }
+  }
+}
+```
+
+执行命令：
+
+```bash
+shipfe deploy --profile dev --all-sub
+```
+
+执行顺序：`admin -> shop`
+
 ## 环境配置文件
 
 为每个环境创建单独的配置文件：

@@ -1,5 +1,5 @@
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ServerConfig {
@@ -35,7 +35,7 @@ pub struct EnvironmentConfig {
     pub local_dist_path: String,
     pub servers: Vec<ServerConfig>,
     pub remote_tmp: String,
-    pub sub_environments: Option<HashMap<String, SubEnvironmentConfig>>,
+    pub sub_environments: Option<IndexMap<String, SubEnvironmentConfig>>,
     pub hashed_asset_patterns: Option<Vec<String>>,
     pub enable_shared: Option<bool>,
     pub keep_releases: Option<u32>,
@@ -43,11 +43,11 @@ pub struct EnvironmentConfig {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GlobalConfig {
-    pub environments: HashMap<String, EnvironmentConfig>,
+    pub environments: IndexMap<String, EnvironmentConfig>,
 }
 
 pub fn create_default_config() -> Result<(), crate::AppError> {
-    let mut environments = HashMap::new();
+    let mut environments = IndexMap::new();
 
     // Development environment
     environments.insert("dev".to_string(), EnvironmentConfig {
@@ -63,7 +63,7 @@ pub fn create_default_config() -> Result<(), crate::AppError> {
         }],
         remote_tmp: "/tmp".to_string(),
         sub_environments: Some({
-            let mut subs = HashMap::new();
+            let mut subs = IndexMap::new();
             subs.insert("admin".to_string(), SubEnvironmentConfig {
                 build_command: Some("npm run build:admin".to_string()),
                 local_dist_path: None,

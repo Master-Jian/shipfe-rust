@@ -45,6 +45,8 @@ shipfe deploy --profile dev-shop
 shipfe deploy --profile dev --all-sub
 ```
 
+When using `shipfe deploy --profile <env> --all-sub`, Shipfe deploys sub-environments in the same order they are declared under `sub_environments` in `shipfe.config.json`. It does not reorder them alphabetically.
+
 ## Directory Structure
 
 Parent and sub-environments are deployed to different directories:
