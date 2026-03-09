@@ -217,166 +217,290 @@ fn upload_and_deploy(
 
     let mut sess = Session::new().map_err(|e| crate::AppError::Invalid(e.to_string()))?;
     sess.set_tcp_stream(tcp);
-    sess.handshake().map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+    sess.handshake()
+        .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
 
     let auth_success = if let Some(password) = &server.password {
         sess.userauth_password(&server.username, password).is_ok()
     } else if let Ok(private_key) = std::env::var("SSH_PRIVATE_KEY") {
-        sess.userauth_pubkey_memory(&server.username, None, &private_key, None).is_ok()
+        sess.userauth_pubkey_memory(&server.username, None, &private_key, None)
+            .is_ok()
     } else if let Some(key_path) = &server.key_path {
-        sess.userauth_pubkey_file(&server.username, None, Path::new(key_path), None).is_ok()
+        sess.userauth_pubkey_file(&server.username, None, Path::new(key_path), None)
+            .is_ok()
     } else {
         false
     };
 
     if !auth_success {
-        return Err(crate::AppError::Invalid("SSH authentication failed".to_string()));
+        return Err(crate::AppError::Invalid(
+            "SSH authentication failed".to_string(),
+        ));
     }
 
-    // 上传 dist.tar.gz
+    // 1) 上传 dist.tar.gz 到远端临时目录
     let remote_archive = format!("{}/dist.tar.gz", remote_tmp);
-    let file_size = metadata(local_archive).map_err(|e| crate::AppError::Invalid(e.to_string()))?.len();
+    let file_size = metadata(local_archive)
+        .map_err(|e| crate::AppError::Invalid(e.to_string()))?
+        .len();
+
     let mut remote_file = sess
         .scp_send(Path::new(&remote_archive), 0o644, file_size, None)
         .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
-    let mut local_file = File::open(local_archive).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
-    io::copy(&mut local_file, &mut remote_file).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
 
-    // 仅上传 current_hashes.txt（保存本次发布涉及的 hash 资源相对路径）
+    let mut local_file =
+        File::open(local_archive).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+    io::copy(&mut local_file, &mut remote_file)
+        .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+
+    // 2) 如果启用 shared，则上传当前发布的 hash 资源清单
     let remote_hashes = format!("{}/current_hashes.txt", remote_tmp);
 
     if enable_shared && !hashed_assets.is_empty() {
-        // ✅ current_hashes.txt：写入相对路径，便于在远端按路径精确处理
         let local_hashes_path = "/tmp/current_hashes.txt";
         let hash_lines = hashed_assets.join("\n");
 
-        std::fs::write(local_hashes_path, hash_lines).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+        std::fs::write(local_hashes_path, hash_lines)
+            .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
 
-        let hashes_size = metadata(local_hashes_path).map_err(|e| crate::AppError::Invalid(e.to_string()))?.len();
+        let hashes_size = metadata(local_hashes_path)
+            .map_err(|e| crate::AppError::Invalid(e.to_string()))?
+            .len();
+
         let mut remote_hashes_file = sess
             .scp_send(Path::new(&remote_hashes), 0o644, hashes_size, None)
             .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
-        let mut local_hashes_file = File::open(local_hashes_path).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
-        io::copy(&mut local_hashes_file, &mut remote_hashes_file).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+
+        let mut local_hashes_file =
+            File::open(local_hashes_path).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+
+        io::copy(&mut local_hashes_file, &mut remote_hashes_file)
+            .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
     }
 
-    // 部署命令
-    let mut commands = vec![format!("mkdir -p {}", deploy_path)];
+    let mut commands = vec![];
+
+    // 3) 基础目录准备
+    commands.push(format!("mkdir -p {}", deploy_path));
     if enable_shared {
-        // 共享文件根目录：shared，下面保持与 dist 相同的相对路径结构
         commands.push(format!("mkdir -p {}/shared", remote_deploy_path));
     }
 
+    // 4) 创建本次 release 目录并解压
     commands.push(format!("cd {} && mkdir -p {}", deploy_path, timestamp));
     commands.push(format!(
         "cd {} && tar -xzf {} -C {} --strip-components=1",
         deploy_path, remote_archive, timestamp
     ));
 
-        if enable_shared && !hashed_assets.is_empty() {
-                // ✅ 使用 snapshot 中记录的相对路径，将本次发布的 hash 资源移动到 shared 下
-                // 然后在原位置创建硬链接。这样：
-                //  - releases/<timestamp> 目录结构与本地 dist 完全一致；
-                //  - shared 仅作为真正的数据存储位置；
-                //  - 如果文件名重复，新的版本会覆盖旧的（mv -f）。
-                commands.push(format!(
-                        "set -e; \
-                         rel_root=\"{d}/releases/{t}\"; \
-                         shared_root=\"{d}/shared\"; \
-                         hashes=\"{h}\"; \
-                         mkdir -p \"$shared_root\"; \
-                         if [ -f \"$hashes\" ]; then \
-                             cd \"$rel_root\"; \
-                             while IFS= read -r p; do \
-                                 [ -z \"$p\" ] && continue; \
-                                 src=\"$rel_root/$p\"; \
-                                 if [ -f \"$src\" ]; then \
-                                     dst=\"$shared_root/$p\"; \
-                                     mkdir -p \"$(dirname \"$dst\")\"; \
-                                     mv -f \"$src\" \"$dst\"; \
-                                     ln -f \"$dst\" \"$src\"; \
-                                 fi; \
-                             done < \"$hashes\"; \
-                         fi; \
-                         true",
-                        d = remote_deploy_path,
-                        t = timestamp,
-                        h = remote_hashes
-                ));
-        }
+    // 5) 如果启用 shared：将当前 release 中的 hash 资源移动到 shared，并在原位置创建硬链接
+    if enable_shared && !hashed_assets.is_empty() {
+    commands.push(format!(
+        r#"set -e;
+rel_root="{d}/releases/{t}";
+shared_root="{d}/shared";
+hashes="{h}";
+manifest="$rel_root/shipfe.hashed_assets.txt";
 
+mkdir -p "$shared_root";
+
+if [ -f "$hashes" ]; then
+    cp "$hashes" "$manifest";
+
+    moved=0
+    linked=0
+    skipped=0
+
+    while IFS= read -r p; do
+        [ -z "$p" ] && continue
+
+        src="$rel_root/$p"
+        dst="$shared_root/$p"
+
+        if [ ! -f "$src" ]; then
+            echo "[shared] skip, src not found: $src"
+            skipped=$((skipped + 1))
+            continue
+        fi
+
+        mkdir -p "$(dirname "$dst")"
+
+        if [ -f "$dst" ]; then
+            rm -f "$src"
+            ln "$dst" "$src"
+            linked=$((linked + 1))
+        else
+            mv "$src" "$dst"
+            ln "$dst" "$src"
+            moved=$((moved + 1))
+        fi
+    done < "$hashes"
+
+    echo "[shared] done: moved=$moved linked=$linked skipped=$skipped"
+else
+    echo "[shared] hashes file not found: $hashes"
+fi
+
+true"#,
+        d = remote_deploy_path,
+        t = timestamp,
+        h = remote_hashes
+    ));
+}
+    // 6) 切 current 到新版本
     commands.push(format!(
         "cd {} && ln -sfn releases/{} current",
         remote_deploy_path, timestamp
     ));
 
-    commands.push(format!(
-        "cd {} && ls -t releases/ | tail -n +{} | xargs -r -I {{}} rm -rf releases/{{}}",
-        remote_deploy_path,
-        keep_releases + 1
-    ));
-
+    // 7) 清理旧 release：只保留 keep_releases 个最新版本；删除时仅移除 shared 中“不再被任何保留的 release 引用”的文件
     if enable_shared {
         commands.push(format!(
-            "set -e; \
-             deploy_root=\"{d}\"; \
-             shared_root=\"$deploy_root/shared\"; \
-             refs_file=\"{tmp}/shipfe_shared_refs_{t}.txt\"; \
-             rm -f \"$refs_file\"; \
-             touch \"$refs_file\"; \
-             if [ -d \"$deploy_root/releases\" ]; then \
-                 for rel in \"$deploy_root\"/releases/*; do \
-                     [ -d \"$rel\" ] || continue; \
-                     manifest=\"$rel/shipfe.hashed_assets.txt\"; \
-                     snapshot=\"$rel/shipfe.snapshot.json\"; \
-                     if [ -f \"$manifest\" ]; then \
-                         cat \"$manifest\" >> \"$refs_file\"; \
-                     elif [ -f \"$snapshot\" ]; then \
-                         awk '/\"hashed_assets\"[[:space:]]*:/ {{ in_list=1; next }} in_list && /]/ {{ in_list=0; next }} in_list {{ gsub(/^[[:space:]]*\"/, \"\"); gsub(/\",?[[:space:]]*$/, \"\"); if (length($0)) print }}' \"$snapshot\" >> \"$refs_file\"; \
-                     fi; \
-                 done; \
-             fi; \
-             sort -u \"$refs_file\" -o \"$refs_file\"; \
-             if [ -d \"$shared_root\" ]; then \
-                 find \"$shared_root\" -type f | while IFS= read -r file; do \
-                     rel=\"${{file#\"$shared_root\"/}}\"; \
-                     if ! grep -Fqx -- \"$rel\" \"$refs_file\"; then \
-                         rm -f \"$file\"; \
-                     fi; \
-                 done; \
-                 find \"$shared_root\" -depth -type d -empty -delete; \
-             fi; \
-             rm -f \"$refs_file\"; \
-             true",
+            r#"set -e;
+deploy_root="{d}";
+releases_root="$deploy_root/releases";
+shared_root="$deploy_root/shared";
+keep="{k}";
+tmp_root="{tmp}";
+now_ts="{t}";
+
+if [ -d "$releases_root" ]; then
+    # 按时间倒序，保留前 keep 个，其余为待删除的 old_releases
+    old_releases=$(cd "$releases_root" && ls -t | tail -n +$((keep + 1)) || true)
+
+    for rel_name in $old_releases; do
+        rel="$releases_root/$rel_name"
+        [ -d "$rel" ] || continue
+
+        manifest="$rel/shipfe.hashed_assets.txt"
+        snapshot="$rel/shipfe.snapshot.json"
+        refs_tmp="$tmp_root/shipfe_release_refs_${{now_ts}}_${{rel_name}}.txt"
+
+        rm -f "$refs_tmp"
+        touch "$refs_tmp"
+
+        # 读取当前将被删除的 release 所引用的 hashed assets
+        if [ -f "$manifest" ]; then
+            cat "$manifest" >> "$refs_tmp"
+        elif [ -f "$snapshot" ]; then
+            awk '/"hashed_assets"[[:space:]]*:/ {{ in_list=1; next }}
+                 in_list && /]/ {{ in_list=0; next }}
+                 in_list {{
+                     gsub(/^[[:space:]]*"/, "");
+                     gsub(/",?[[:space:]]*$/, "");
+                     if (length($0)) print
+                 }}' "$snapshot" >> "$refs_tmp"
+        fi
+
+        sort -u "$refs_tmp" -o "$refs_tmp"
+
+        # 删除 shared 中“仅被当前 release 使用”的文件
+        if [ -d "$shared_root" ] && [ -s "$refs_tmp" ]; then
+            while IFS= read -r rel_path; do
+                [ -z "$rel_path" ] && continue
+
+                still_used=0
+
+                for other_rel in "$releases_root"/*; do
+                    [ -d "$other_rel" ] || continue
+                    [ "$other_rel" = "$rel" ] && continue
+
+                    other_manifest="$other_rel/shipfe.hashed_assets.txt"
+                    other_snapshot="$other_rel/shipfe.snapshot.json"
+
+                    if [ -f "$other_manifest" ] && grep -Fqx -- "$rel_path" "$other_manifest"; then
+                        still_used=1
+                        break
+                    fi
+
+                    if [ -f "$other_snapshot" ] && awk -v target="$rel_path" '
+                        BEGIN {{ found=0 }}
+                        /"hashed_assets"[[:space:]]*:/ {{ in_list=1; next }}
+                        in_list && /]/ {{ in_list=0; next }}
+                        in_list {{
+                            gsub(/^[[:space:]]*"/, "");
+                            gsub(/",?[[:space:]]*$/, "");
+                            if ($0 == target) {{
+                                found=1;
+                                exit 0
+                            }}
+                        }}
+                        END {{
+                            if (found == 1) exit 0;
+                            exit 1;
+                        }}
+                    ' "$other_snapshot"; then
+                        still_used=1
+                        break
+                    fi
+                done
+
+                if [ "$still_used" -eq 0 ]; then
+                    shared_file="$shared_root/$rel_path"
+                    [ -f "$shared_file" ] && rm -f "$shared_file"
+                fi
+            done < "$refs_tmp"
+
+            find "$shared_root" -depth -type d -empty -delete || true
+        fi
+
+        rm -f "$refs_tmp"
+        rm -rf "$rel"
+    done
+fi
+
+true"#,
             d = remote_deploy_path,
+            k = keep_releases,
             tmp = remote_tmp,
             t = timestamp,
         ));
+    } else {
+        // 不启用 shared 时，按原逻辑直接删旧 release
+        commands.push(format!(
+            "cd {} && ls -t releases/ | tail -n +{} | xargs -r -I {{}} rm -rf releases/{{}}",
+            remote_deploy_path,
+            keep_releases + 1
+        ));
     }
 
+    // 8) 删除远端临时文件
     commands.push(format!("rm -f {}", remote_archive));
     if enable_shared && !hashed_assets.is_empty() {
         commands.push(format!("rm -f {}", remote_hashes));
     }
 
+    // 9) 逐条执行远端命令
     for cmd in commands {
-        let mut channel = sess.channel_session().map_err(|e| crate::AppError::Invalid(e.to_string()))?;
-        channel.exec(&cmd).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+        let mut channel = sess
+            .channel_session()
+            .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
 
-        // ✅ 关键：stderr 合并进 stdout
-        channel.handle_extended_data(ssh2::ExtendedData::Merge)
+        channel
+            .exec(&cmd)
+            .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+
+        channel
+            .handle_extended_data(ssh2::ExtendedData::Merge)
             .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
 
         let mut output = String::new();
-        channel.read_to_string(&mut output).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
-        channel.wait_close().map_err(|e| crate::AppError::Invalid(e.to_string()))?;
-        let status = channel.exit_status().map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+        channel
+            .read_to_string(&mut output)
+            .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+
+        channel
+            .wait_close()
+            .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+
+        let status = channel
+            .exit_status()
+            .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
 
         if status != 0 {
             return Err(crate::AppError::Invalid(format!(
                 "Command failed: {}\n---- remote output ----\n{}",
-                cmd,
-                output
+                cmd, output
             )));
         }
     }

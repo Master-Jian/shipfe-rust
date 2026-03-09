@@ -1,12 +1,14 @@
 {
   "name": "shipfe",
-  "version": "2.0.2",
+  "version": "2.1.0",
   "description": "A deployment tool for web applications",
   "main": "index.js",
   "bin": {
     "shipfe": "bin/shipfe"
   },
   "scripts": {
+    "build": "cargo build --release && mkdir -p bin && cp target/release/shipfe bin/shipfe",
+    "prepublishOnly": "npm run build",
     "test": "echo \"Error: no test specified\" && exit 1",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
