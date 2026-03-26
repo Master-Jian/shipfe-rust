@@ -140,18 +140,6 @@ fn run_build_command(cmd: &str) -> Result<(), crate::AppError> {
     }
 }
 
-fn write_hashed_assets_manifest(dist_path: &str, hashed_assets: &[String]) -> Result<(), crate::AppError> {
-    let manifest_path = format!("{}/shipfe.hashed_assets.txt", dist_path);
-    let content = if hashed_assets.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", hashed_assets.join("\n"))
-    };
-
-    std::fs::write(&manifest_path, content).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
-    Ok(())
-}
-
 pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), crate::AppError> {
     if let Some(build_cmd) = &config.build_command {
         run_build_command(build_cmd)?;
@@ -173,26 +161,36 @@ pub fn deploy_free(config: &crate::config::DeployParams) -> Result<(), crate::Ap
         Vec::new()
     };
 
-    write_hashed_assets_manifest(&config.local_dist_path, &hashed_assets)?;
-
-    let archive_path = "/tmp/dist.tar.gz";
+    let archive_path = format!("/tmp/shipfe_dist_{}_{}.tar.gz", timestamp, std::process::id());
     log_message(&format!("Compressing {} to {}", config.local_dist_path, archive_path));
     compress_dist(&config.local_dist_path, &archive_path)?;
     log_message("Compression completed");
 
-    for server in &config.servers {
-        upload_and_deploy(
-            server,
-            &archive_path,
-            &hashed_assets,
-            &server.remote_deploy_path,
-            &config.remote_tmp,
-            &timestamp,
-            config.enable_shared,
-            config.keep_releases,
-            &config.local_dist_path,
-        )?;
+    let deploy_result: Result<(), crate::AppError> = (|| {
+        for server in &config.servers {
+            upload_and_deploy(
+                server,
+                &archive_path,
+                &hashed_assets,
+                &server.remote_deploy_path,
+                &config.remote_tmp,
+                &timestamp,
+                config.enable_shared,
+                config.keep_releases,
+                &config.local_dist_path,
+            )?;
+        }
+        Ok(())
+    })();
+
+    if let Err(err) = std::fs::remove_file(&archive_path) {
+        log_message(&format!(
+            "Warning: Failed to remove local archive {}: {}",
+            archive_path, err
+        ));
     }
+
+    deploy_result?;
 
     log_message("Deployment completed successfully");
     Ok(())
@@ -238,8 +236,9 @@ fn upload_and_deploy(
         ));
     }
 
-    // 1) 上传 dist.tar.gz 到远端临时目录
-    let remote_archive = format!("{}/dist.tar.gz", remote_tmp);
+    // 1) 上传 dist.tar.gz 到远端临时目录（使用唯一文件名避免并发部署互相覆盖）
+    let pid = std::process::id();
+    let remote_archive = format!("{}/shipfe_dist_{}_{}.tar.gz", remote_tmp, timestamp, pid);
     let file_size = metadata(local_archive)
         .map_err(|e| crate::AppError::Invalid(e.to_string()))?
         .len();
@@ -253,17 +252,20 @@ fn upload_and_deploy(
     io::copy(&mut local_file, &mut remote_file)
         .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
 
-    // 2) 如果启用 shared，则上传当前发布的 hash 资源清单
-    let remote_hashes = format!("{}/current_hashes.txt", remote_tmp);
+    // 2) 如果启用 shared，则上传当前发布的 hash 资源清单（唯一文件名）
+    let remote_hashes = format!(
+        "{}/shipfe_current_hashes_{}_{}.txt",
+        remote_tmp, timestamp, pid
+    );
 
     if enable_shared && !hashed_assets.is_empty() {
-        let local_hashes_path = "/tmp/current_hashes.txt";
+        let local_hashes_path = format!("/tmp/shipfe_current_hashes_{}_{}.txt", timestamp, pid);
         let hash_lines = hashed_assets.join("\n");
 
-        std::fs::write(local_hashes_path, hash_lines)
+        std::fs::write(&local_hashes_path, hash_lines)
             .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
 
-        let hashes_size = metadata(local_hashes_path)
+        let hashes_size = metadata(&local_hashes_path)
             .map_err(|e| crate::AppError::Invalid(e.to_string()))?
             .len();
 
@@ -272,10 +274,17 @@ fn upload_and_deploy(
             .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
 
         let mut local_hashes_file =
-            File::open(local_hashes_path).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+            File::open(&local_hashes_path).map_err(|e| crate::AppError::Invalid(e.to_string()))?;
 
         io::copy(&mut local_hashes_file, &mut remote_hashes_file)
             .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+
+        if let Err(err) = std::fs::remove_file(&local_hashes_path) {
+            log_message(&format!(
+                "Warning: Failed to remove local hash manifest {}: {}",
+                local_hashes_path, err
+            ));
+        }
     }
 
     let mut commands = vec![];
@@ -293,22 +302,20 @@ fn upload_and_deploy(
         deploy_path, remote_archive, timestamp
     ));
 
-    // 5) 如果启用 shared：将当前 release 中的 hash 资源移动到 shared，并在原位置创建硬链接
+    // 5) 如果启用 shared：将当前 release 的 hash 资源沉淀到 shared（平铺增量），并在原位置创建硬链接
     if enable_shared && !hashed_assets.is_empty() {
-    commands.push(format!(
-        r#"set -e;
+        commands.push(format!(
+            r#"set -e;
 rel_root="{d}/releases/{t}";
 shared_root="{d}/shared";
 hashes="{h}";
-manifest="$rel_root/shipfe.hashed_assets.txt";
 
 mkdir -p "$shared_root";
 
 if [ -f "$hashes" ]; then
-    cp "$hashes" "$manifest";
-
     moved=0
     linked=0
+    conflicts=0
     skipped=0
 
     while IFS= read -r p; do
@@ -326,34 +333,41 @@ if [ -f "$hashes" ]; then
         mkdir -p "$(dirname "$dst")"
 
         if [ -f "$dst" ]; then
-            rm -f "$src"
-            ln "$dst" "$src"
-            linked=$((linked + 1))
+            if cmp -s "$src" "$dst"; then
+                rm -f "$src"
+                ln "$dst" "$src"
+                linked=$((linked + 1))
+            else
+                # 同路径不同内容：不覆盖 shared，保留 release 内文件，避免串版本
+                echo "[shared] conflict, keep release file: $src"
+                conflicts=$((conflicts + 1))
+            fi
         else
             mv "$src" "$dst"
             ln "$dst" "$src"
             moved=$((moved + 1))
+            linked=$((linked + 1))
         fi
     done < "$hashes"
 
-    echo "[shared] done: moved=$moved linked=$linked skipped=$skipped"
+    echo "[shared] done: moved=$moved linked=$linked conflicts=$conflicts skipped=$skipped"
 else
     echo "[shared] hashes file not found: $hashes"
 fi
 
 true"#,
-        d = remote_deploy_path,
-        t = timestamp,
-        h = remote_hashes
-    ));
-}
+            d = remote_deploy_path,
+            t = timestamp,
+            h = remote_hashes
+        ));
+    }
     // 6) 切 current 到新版本
     commands.push(format!(
         "cd {} && ln -sfn releases/{} current",
         remote_deploy_path, timestamp
     ));
 
-    // 7) 清理旧 release：只保留 keep_releases 个最新版本；删除时仅移除 shared 中“不再被任何保留的 release 引用”的文件
+    // 7) 清理旧 release：只保留 keep_releases 个最新版本；同时清理 shared 中不再被保留版本引用的文件
     if enable_shared {
         commands.push(format!(
             r#"set -e;
@@ -363,26 +377,36 @@ shared_root="$deploy_root/shared";
 keep="{k}";
 tmp_root="{tmp}";
 now_ts="{t}";
+cleanup_deleted_release=0
+cleanup_deleted_shared_unref=0
+cleanup_deleted_shared_reconcile=0
 
-if [ -d "$releases_root" ]; then
-    # 按时间倒序，保留前 keep 个，其余为待删除的 old_releases
-    old_releases=$(cd "$releases_root" && ls -t | tail -n +$((keep + 1)) || true)
+mkdir -p "$tmp_root"
+
+if [ "$keep" -eq 0 ]; then
+    echo "[cleanup] keep_releases=0, skip release cleanup"
+elif [ -d "$releases_root" ]; then
+    # 仅统计 release 目录，按时间戳名称倒序，保留前 keep 个
+    old_releases=$(
+        find "$releases_root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null \
+            | sed "s#^$releases_root/##" \
+            | grep -E '^[0-9]{{8}}_[0-9]{{6}}$' \
+            | sort -r \
+            | tail -n +$((keep + 1)) || true
+    )
 
     for rel_name in $old_releases; do
         rel="$releases_root/$rel_name"
         [ -d "$rel" ] || continue
 
-        manifest="$rel/shipfe.hashed_assets.txt"
         snapshot="$rel/shipfe.snapshot.json"
         refs_tmp="$tmp_root/shipfe_release_refs_${{now_ts}}_${{rel_name}}.txt"
 
         rm -f "$refs_tmp"
         touch "$refs_tmp"
 
-        # 读取当前将被删除的 release 所引用的 hashed assets
-        if [ -f "$manifest" ]; then
-            cat "$manifest" >> "$refs_tmp"
-        elif [ -f "$snapshot" ]; then
+        # 读取将被删除 release 引用的资源清单
+        if [ -f "$snapshot" ]; then
             awk '/"hashed_assets"[[:space:]]*:/ {{ in_list=1; next }}
                  in_list && /]/ {{ in_list=0; next }}
                  in_list {{
@@ -394,24 +418,17 @@ if [ -d "$releases_root" ]; then
 
         sort -u "$refs_tmp" -o "$refs_tmp"
 
-        # 删除 shared 中“仅被当前 release 使用”的文件
+        # 仅删除 shared 中“不再被任何保留 release 使用”的文件
         if [ -d "$shared_root" ] && [ -s "$refs_tmp" ]; then
             while IFS= read -r rel_path; do
                 [ -z "$rel_path" ] && continue
 
                 still_used=0
-
                 for other_rel in "$releases_root"/*; do
                     [ -d "$other_rel" ] || continue
                     [ "$other_rel" = "$rel" ] && continue
 
-                    other_manifest="$other_rel/shipfe.hashed_assets.txt"
                     other_snapshot="$other_rel/shipfe.snapshot.json"
-
-                    if [ -f "$other_manifest" ] && grep -Fqx -- "$rel_path" "$other_manifest"; then
-                        still_used=1
-                        break
-                    fi
 
                     if [ -f "$other_snapshot" ] && awk -v target="$rel_path" '
                         BEGIN {{ found=0 }}
@@ -437,7 +454,10 @@ if [ -d "$releases_root" ]; then
 
                 if [ "$still_used" -eq 0 ]; then
                     shared_file="$shared_root/$rel_path"
-                    [ -f "$shared_file" ] && rm -f "$shared_file"
+                    if [ -f "$shared_file" ]; then
+                        rm -f "$shared_file"
+                        cleanup_deleted_shared_unref=$((cleanup_deleted_shared_unref + 1))
+                    fi
                 fi
             done < "$refs_tmp"
 
@@ -446,8 +466,67 @@ if [ -d "$releases_root" ]; then
 
         rm -f "$refs_tmp"
         rm -rf "$rel"
+        cleanup_deleted_release=$((cleanup_deleted_release + 1))
     done
 fi
+
+# 全量校准 shared：仅保留当前 releases 仍引用的 hashed_assets，清理历史残留
+keep_refs_tmp="$tmp_root/shipfe_keep_refs_${{now_ts}}.txt"
+rm -f "$keep_refs_tmp"
+touch "$keep_refs_tmp"
+
+if [ -d "$releases_root" ]; then
+    for rel in "$releases_root"/*; do
+        [ -d "$rel" ] || continue
+        snapshot="$rel/shipfe.snapshot.json"
+        if [ -f "$snapshot" ]; then
+            awk '/"hashed_assets"[[:space:]]*:/ {{ in_list=1; next }}
+                 in_list && /]/ {{ in_list=0; next }}
+                 in_list {{
+                     gsub(/^[[:space:]]*"/, "");
+                     gsub(/",?[[:space:]]*$/, "");
+                     if (length($0)) print
+                 }}' "$snapshot" >> "$keep_refs_tmp"
+        fi
+    done
+fi
+
+sort -u "$keep_refs_tmp" -o "$keep_refs_tmp"
+
+if [ -d "$shared_root" ]; then
+    shared_files_tmp="$tmp_root/shipfe_shared_files_${{now_ts}}.txt"
+    find "$shared_root" -type f 2>/dev/null > "$shared_files_tmp" || true
+    if [ -f "$shared_files_tmp" ]; then
+        while IFS= read -r shared_file; do
+            [ -z "$shared_file" ] && continue
+            rel_path="${{shared_file#"$shared_root/"}}"
+            if [ -s "$keep_refs_tmp" ] && grep -Fqx -- "$rel_path" "$keep_refs_tmp"; then
+                continue
+            fi
+            rm -f "$shared_file"
+            cleanup_deleted_shared_reconcile=$((cleanup_deleted_shared_reconcile + 1))
+        done < "$shared_files_tmp"
+    fi
+    rm -f "$shared_files_tmp"
+    find "$shared_root" -depth -type d -empty -delete || true
+fi
+
+kept_release_count=0
+shared_total_count=0
+if [ -d "$releases_root" ]; then
+    kept_release_count=$(
+        find "$releases_root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null \
+            | sed "s#^$releases_root/##" \
+            | grep -E '^[0-9]{{8}}_[0-9]{{6}}$' \
+            | wc -l | tr -d ' '
+    )
+fi
+if [ -d "$shared_root" ]; then
+    shared_total_count=$(find "$shared_root" -type f 2>/dev/null | wc -l | tr -d ' ')
+fi
+echo "[cleanup] done: releases_deleted=$cleanup_deleted_release shared_deleted_unref=$cleanup_deleted_shared_unref shared_deleted_reconcile=$cleanup_deleted_shared_reconcile releases_kept=$kept_release_count shared_files=$shared_total_count"
+
+rm -f "$keep_refs_tmp"
 
 true"#,
             d = remote_deploy_path,
@@ -456,11 +535,31 @@ true"#,
             t = timestamp,
         ));
     } else {
-        // 不启用 shared 时，按原逻辑直接删旧 release
+        // 不启用 shared 时，按同样规则直接删旧 release
         commands.push(format!(
-            "cd {} && ls -t releases/ | tail -n +{} | xargs -r -I {{}} rm -rf releases/{{}}",
-            remote_deploy_path,
-            keep_releases + 1
+            r#"set -e;
+deploy_root="{d}";
+releases_root="$deploy_root/releases";
+keep="{k}";
+
+if [ "$keep" -eq 0 ]; then
+    echo "[cleanup] keep_releases=0, skip release cleanup"
+elif [ -d "$releases_root" ]; then
+    old_releases=$(
+        find "$releases_root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null \
+            | sed "s#^$releases_root/##" \
+            | grep -E '^[0-9]{{8}}_[0-9]{{6}}$' \
+            | sort -r \
+            | tail -n +$((keep + 1)) || true
+    )
+    for rel_name in $old_releases; do
+        rm -rf "$releases_root/$rel_name"
+    done
+fi
+
+true"#,
+            d = remote_deploy_path,
+            k = keep_releases,
         ));
     }
 
@@ -496,6 +595,15 @@ true"#,
         let status = channel
             .exit_status()
             .map_err(|e| crate::AppError::Invalid(e.to_string()))?;
+
+        if !output.trim().is_empty() {
+            for line in output.lines() {
+                let text = line.trim();
+                if !text.is_empty() {
+                    log_message(&format!("[remote] {}", text));
+                }
+            }
+        }
 
         if status != 0 {
             return Err(crate::AppError::Invalid(format!(
