@@ -302,7 +302,8 @@ fn upload_and_deploy(
         deploy_path, remote_archive, timestamp
     ));
 
-    // 5) 如果启用 shared：将当前 release 的 hash 资源沉淀到 shared（平铺增量），并在原位置创建硬链接
+    // 5) 如果启用 shared：按 hashed_asset_patterns 直接把匹配到的文件复制进 shared，
+    //    保持目录结构；同名文件全部覆盖；release 自身保持完整，不做硬链接/搬移。
     if enable_shared && !hashed_assets.is_empty() {
         commands.push(format!(
             r#"set -e;
@@ -313,9 +314,8 @@ hashes="{h}";
 mkdir -p "$shared_root";
 
 if [ -f "$hashes" ]; then
-    moved=0
-    linked=0
-    conflicts=0
+    copied=0
+    overwritten=0
     skipped=0
 
     while IFS= read -r p; do
@@ -333,24 +333,14 @@ if [ -f "$hashes" ]; then
         mkdir -p "$(dirname "$dst")"
 
         if [ -f "$dst" ]; then
-            if cmp -s "$src" "$dst"; then
-                rm -f "$src"
-                ln "$dst" "$src"
-                linked=$((linked + 1))
-            else
-                # 同路径不同内容：不覆盖 shared，保留 release 内文件，避免串版本
-                echo "[shared] conflict, keep release file: $src"
-                conflicts=$((conflicts + 1))
-            fi
-        else
-            mv "$src" "$dst"
-            ln "$dst" "$src"
-            moved=$((moved + 1))
-            linked=$((linked + 1))
+            overwritten=$((overwritten + 1))
         fi
+
+        cp -f "$src" "$dst"
+        copied=$((copied + 1))
     done < "$hashes"
 
-    echo "[shared] done: moved=$moved linked=$linked conflicts=$conflicts skipped=$skipped"
+    echo "[shared] done: copied=$copied overwritten=$overwritten skipped=$skipped"
 else
     echo "[shared] hashes file not found: $hashes"
 fi
@@ -367,7 +357,9 @@ true"#,
         remote_deploy_path, timestamp
     ));
 
-    // 7) 清理旧 release：只保留 keep_releases 个最新版本；同时清理 shared 中不再被保留版本引用的文件
+    // 7) 清理旧 release：只按 keep_releases 触发；对被删 release，只依据它自己的 snapshot
+    //    删 shared 里对应的那些文件；若文件仍被其他保留 release 的 snapshot 引用则保留。
+    //    不会动"对应不上这个被删 release"的 shared 文件。
     if enable_shared {
         commands.push(format!(
             r#"set -e;
@@ -378,8 +370,7 @@ keep="{k}";
 tmp_root="{tmp}";
 now_ts="{t}";
 cleanup_deleted_release=0
-cleanup_deleted_shared_unref=0
-cleanup_deleted_shared_reconcile=0
+cleanup_deleted_shared=0
 
 mkdir -p "$tmp_root"
 
@@ -405,7 +396,7 @@ elif [ -d "$releases_root" ]; then
         rm -f "$refs_tmp"
         touch "$refs_tmp"
 
-        # 读取将被删除 release 引用的资源清单
+        # 读取将被删除 release 自己 snapshot 里登记过的 shared 文件路径
         if [ -f "$snapshot" ]; then
             awk '/"hashed_assets"[[:space:]]*:/ {{ in_list=1; next }}
                  in_list && /]/ {{ in_list=0; next }}
@@ -418,7 +409,7 @@ elif [ -d "$releases_root" ]; then
 
         sort -u "$refs_tmp" -o "$refs_tmp"
 
-        # 仅删除 shared 中“不再被任何保留 release 使用”的文件
+        # 仅在 shared 中删除"被删 release 登记 且 其他保留 release 都不再引用"的文件
         if [ -d "$shared_root" ] && [ -s "$refs_tmp" ]; then
             while IFS= read -r rel_path; do
                 [ -z "$rel_path" ] && continue
@@ -456,7 +447,7 @@ elif [ -d "$releases_root" ]; then
                     shared_file="$shared_root/$rel_path"
                     if [ -f "$shared_file" ]; then
                         rm -f "$shared_file"
-                        cleanup_deleted_shared_unref=$((cleanup_deleted_shared_unref + 1))
+                        cleanup_deleted_shared=$((cleanup_deleted_shared + 1))
                     fi
                 fi
             done < "$refs_tmp"
@@ -468,47 +459,6 @@ elif [ -d "$releases_root" ]; then
         rm -rf "$rel"
         cleanup_deleted_release=$((cleanup_deleted_release + 1))
     done
-fi
-
-# 全量校准 shared：仅保留当前 releases 仍引用的 hashed_assets，清理历史残留
-keep_refs_tmp="$tmp_root/shipfe_keep_refs_${{now_ts}}.txt"
-rm -f "$keep_refs_tmp"
-touch "$keep_refs_tmp"
-
-if [ -d "$releases_root" ]; then
-    for rel in "$releases_root"/*; do
-        [ -d "$rel" ] || continue
-        snapshot="$rel/shipfe.snapshot.json"
-        if [ -f "$snapshot" ]; then
-            awk '/"hashed_assets"[[:space:]]*:/ {{ in_list=1; next }}
-                 in_list && /]/ {{ in_list=0; next }}
-                 in_list {{
-                     gsub(/^[[:space:]]*"/, "");
-                     gsub(/",?[[:space:]]*$/, "");
-                     if (length($0)) print
-                 }}' "$snapshot" >> "$keep_refs_tmp"
-        fi
-    done
-fi
-
-sort -u "$keep_refs_tmp" -o "$keep_refs_tmp"
-
-if [ -d "$shared_root" ]; then
-    shared_files_tmp="$tmp_root/shipfe_shared_files_${{now_ts}}.txt"
-    find "$shared_root" -type f 2>/dev/null > "$shared_files_tmp" || true
-    if [ -f "$shared_files_tmp" ]; then
-        while IFS= read -r shared_file; do
-            [ -z "$shared_file" ] && continue
-            rel_path="${{shared_file#"$shared_root/"}}"
-            if [ -s "$keep_refs_tmp" ] && grep -Fqx -- "$rel_path" "$keep_refs_tmp"; then
-                continue
-            fi
-            rm -f "$shared_file"
-            cleanup_deleted_shared_reconcile=$((cleanup_deleted_shared_reconcile + 1))
-        done < "$shared_files_tmp"
-    fi
-    rm -f "$shared_files_tmp"
-    find "$shared_root" -depth -type d -empty -delete || true
 fi
 
 kept_release_count=0
@@ -524,9 +474,7 @@ fi
 if [ -d "$shared_root" ]; then
     shared_total_count=$(find "$shared_root" -type f 2>/dev/null | wc -l | tr -d ' ')
 fi
-echo "[cleanup] done: releases_deleted=$cleanup_deleted_release shared_deleted_unref=$cleanup_deleted_shared_unref shared_deleted_reconcile=$cleanup_deleted_shared_reconcile releases_kept=$kept_release_count shared_files=$shared_total_count"
-
-rm -f "$keep_refs_tmp"
+echo "[cleanup] done: releases_deleted=$cleanup_deleted_release shared_deleted=$cleanup_deleted_shared releases_kept=$kept_release_count shared_files=$shared_total_count"
 
 true"#,
             d = remote_deploy_path,
